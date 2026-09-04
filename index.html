@@ -1368,10 +1368,26 @@ const SPOTIFY_LS_KEY = 'wodspinner_spotify_v1';
 const SPOTIFY_RETURN_KEY = 'wodspinner_spotify_return_v1';
 
 function loadSpotifyAuth(){
-  try{ const raw = localStorage.getItem(SPOTIFY_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){}
+  try{
+    const raw = localStorage.getItem(SPOTIFY_LS_KEY);
+    if(!raw) return null;
+    const auth = JSON.parse(raw);
+    // if the required scope list has changed since this token was issued
+    // (e.g. we add a scope the SDK turns out to need), the old token is no
+    // longer valid for what we're about to ask it to do — discard it so the
+    // app falls back to a genuine fresh login instead of silently retrying
+    // the same broken token forever.
+    if(auth.scope !== SPOTIFY_SCOPES){
+      localStorage.removeItem(SPOTIFY_LS_KEY);
+      return null;
+    }
+    return auth;
+  }catch(e){}
   return null;
 }
-function saveSpotifyAuth(auth){ try{ localStorage.setItem(SPOTIFY_LS_KEY, JSON.stringify(auth)); }catch(e){} }
+function saveSpotifyAuth(auth){
+  try{ localStorage.setItem(SPOTIFY_LS_KEY, JSON.stringify({...auth, scope:SPOTIFY_SCOPES})); }catch(e){}
+}
 function clearSpotifyAuth(){ try{ localStorage.removeItem(SPOTIFY_LS_KEY); }catch(e){} }
 
 let SPOTIFY = {
