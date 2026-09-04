@@ -1568,11 +1568,22 @@ async function spotifyInitPlayer(){
     renderSpotifyPanel();
   });
   SPOTIFY.player.addListener('not_ready', ()=>{ SPOTIFY.deviceReady = false; renderSpotifyPanel(); });
-  SPOTIFY.player.addListener('initialization_error', ()=>{ SPOTIFY.initializing = false; });
-  SPOTIFY.player.addListener('authentication_error', ()=>{ SPOTIFY.initializing = false; spotifyLogout(); });
-  SPOTIFY.player.addListener('account_error', ()=>{
-    SPOTIFY.accountError = 'Spotify Premium is required for in-app playback.';
+  SPOTIFY.player.addListener('initialization_error', ({message})=>{
     SPOTIFY.initializing = false;
+    SPOTIFY.lastError = 'Player failed to initialize: ' + (message || 'unknown error');
+    renderSpotifyBanner();
+  });
+  SPOTIFY.player.addListener('authentication_error', ({message})=>{
+    SPOTIFY.initializing = false;
+    SPOTIFY.lastError = 'Spotify logged you out automatically \u2014 authentication error: ' + (message || 'unknown error');
+    renderSpotifyBanner();
+    spotifyLogout();
+  });
+  SPOTIFY.player.addListener('account_error', ({message})=>{
+    SPOTIFY.accountError = 'Spotify Premium is required for in-app playback.';
+    SPOTIFY.lastError = 'Spotify account error: ' + (message || 'Premium required for in-app playback.');
+    SPOTIFY.initializing = false;
+    renderSpotifyBanner();
     renderSpotifyPanel();
   });
   SPOTIFY.player.addListener('player_state_changed', (state)=>{
