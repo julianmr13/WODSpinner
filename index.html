@@ -45,6 +45,24 @@
     border-bottom:1px solid var(--border-soft);
     flex-shrink:0;
   }
+  #spotify-banner:empty{display:none;}
+  #spotify-banner{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    padding:12px 32px;
+    background:#3a1414;
+    border-bottom:1px solid var(--red);
+    color:#ffb3ab;
+    font-size:13px;
+  }
+  #spotify-banner button{
+    background:none;border:1px solid #ffb3ab;color:#ffb3ab;
+    padding:5px 12px;font-size:12px;cursor:pointer;flex-shrink:0;
+  }
+  #spotify-banner.ok{background:#123822;border-bottom:1px solid var(--green);color:#a8f0c6;}
+  #spotify-banner.ok button{border-color:#a8f0c6;color:#a8f0c6;}
   .brand{
     display:flex;
     align-items:center;
@@ -501,6 +519,7 @@
   </div>
 </div>
 
+<div id="spotify-banner"></div>
 <main id="main"></main>
 
 <script>
@@ -1363,6 +1382,7 @@ let SPOTIFY = {
   deviceReady: false,
   accountError: null,
   lastError: null,
+  lastMessage: null,
   searchResults: [],
   searching: false,
   currentPlaylist: null,
@@ -1450,6 +1470,7 @@ async function handleSpotifyRedirect(){
           };
           saveSpotifyAuth(SPOTIFY.auth);
           SPOTIFY.lastError = null;
+          SPOTIFY.lastMessage = 'Spotify connected successfully.';
         } else {
           SPOTIFY.lastError = 'Token exchange failed: ' + (data.error_description || data.error || resp.status);
         }
@@ -1682,11 +1703,32 @@ function setNavActive(){
 
 function render(){
   setNavActive();
+  renderSpotifyBanner();
   if(APP.screen==='landing') return renderLanding();
   if(APP.screen==='picker') return renderPicker();
   if(APP.screen==='full') return renderFull();
   if(APP.screen==='settings') return renderSettings();
   if(APP.screen==='favourites') return renderFavourites();
+}
+
+function renderSpotifyBanner(){
+  const el = document.getElementById('spotify-banner');
+  if(!el) return;
+  if(SPOTIFY.lastError){
+    el.className = '';
+    el.innerHTML = `<span>Spotify: ${SPOTIFY.lastError}</span><button onclick="dismissSpotifyBanner()">Dismiss</button>`;
+  } else if(SPOTIFY.lastMessage){
+    el.className = 'ok';
+    el.innerHTML = `<span>Spotify: ${SPOTIFY.lastMessage}</span><button onclick="dismissSpotifyBanner()">Dismiss</button>`;
+  } else {
+    el.className = '';
+    el.innerHTML = '';
+  }
+}
+function dismissSpotifyBanner(){
+  SPOTIFY.lastError = null;
+  SPOTIFY.lastMessage = null;
+  renderSpotifyBanner();
 }
 
 function renderLanding(){
@@ -1992,10 +2034,22 @@ function loadFavourite(idx){
 /* ---------- init ---------- */
 // process any Spotify login redirect (?code=...) before the first render,
 // so a returning user lands back where they were, already connected
-(async function initApp(){
+async function processSpotifyReturn(){
   await handleSpotifyRedirect();
   render();
-})();
+}
+// mobile browsers can restore this page from cache when Spotify redirects
+// back (treating it like a "back" navigation rather than a fresh load), which
+// would skip the normal script run entirely and silently drop the ?code=/
+// ?error= params. 'pageshow' fires on both fresh loads AND cache restores,
+// so re-check for those params there too as a safety net.
+window.addEventListener('pageshow', function(){
+  const url = new URL(window.location.href);
+  if(url.searchParams.get('code') || url.searchParams.get('error')){
+    processSpotifyReturn();
+  }
+});
+processSpotifyReturn();
 
 </script>
 </body>
