@@ -1643,6 +1643,15 @@ async function spotifySelectPlaylist(uri, name){
   }catch(e){}
   renderSpotifyPanel();
 }
+// wrapper so result tiles reference a playlist by index rather than embedding
+// its name/uri directly in an inline onclick attribute — building that
+// string with JSON.stringify(name) inside an already-double-quoted onclick
+// attribute broke on every result, since both use double quotes
+function spotifySelectPlaylistAt(idx){
+  const p = SPOTIFY.searchResults[idx];
+  if(!p) return;
+  spotifySelectPlaylist(p.uri, p.name);
+}
 async function spotifyTogglePlay(){
   if(!SPOTIFY.player) return;
   try{ await SPOTIFY.player.togglePlay(); }catch(e){}
@@ -1695,8 +1704,8 @@ function renderSpotifyPanel(){
     return;
   }
 
-  const results = SPOTIFY.searchResults.map(p=>`
-    <div class="sp-result" onclick="spotifySelectPlaylist('${p.uri}', ${JSON.stringify(p.name)})">
+  const results = SPOTIFY.searchResults.map((p,idx)=>`
+    <div class="sp-result" onclick="spotifySelectPlaylistAt(${idx})">
       ${p.images && p.images[0] ? `<img class="sp-thumb" src="${p.images[0].url}">` : '<div class="sp-thumb sp-thumb-empty"></div>'}
       <div>
         <div class="sp-result-name">${p.name}</div>
