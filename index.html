@@ -1362,6 +1362,7 @@ let SPOTIFY = {
   deviceId: null,
   deviceReady: false,
   accountError: null,
+  lastError: null,
   searchResults: [],
   searching: false,
   currentPlaylist: null,
@@ -1421,30 +1422,47 @@ async function handleSpotifyRedirect(){
   const err = url.searchParams.get('error');
   if(!code && !err) return;
   window.history.replaceState({}, document.title, SPOTIFY_REDIRECT_URI);
-  if(err) return;
-  const savedState = sessionStorage.getItem('spotify_state');
-  const verifier = sessionStorage.getItem('spotify_verifier');
-  if(!verifier || state!==savedState) return; // CSRF check failed — abort quietly
-  try{
-    const resp = await fetch('https://accounts.spotify.com/api/token', {
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body: new URLSearchParams({
-        grant_type:'authorization_code', code,
-        redirect_uri: SPOTIFY_REDIRECT_URI, client_id: SPOTIFY_CLIENT_ID,
-        code_verifier: verifier,
-      })
-    });
-    const data = await resp.json();
-    if(data.access_token){
-      SPOTIFY.auth = {
-        access_token: data.access_token,
-        refresh_token: data.refresh_token,
-        expires_at: Date.now() + (data.expires_in*1000) - 30000,
-      };
-      saveSpotifyAuth(SPOTIFY.auth);
+
+  if(err){
+    SPOTIFY.lastError = 'Spotify returned: ' + err;
+  } else {
+    const savedState = sessionStorage.getItem('spotify_state');
+    const verifier = sessionStorage.getItem('spotify_verifier');
+    if(!verifier || state!==savedState){
+      SPOTIFY.lastError = 'Login could not be verified (state/verifier mismatch) \u2014 try connecting again.';
+    } else {
+      try{
+        const resp = await fetch('https://accounts.spotify.com/api/token', {
+          method:'POST',
+          headers:{'Content-Type':'application/x-www-form-urlencoded'},
+          body: new URLSearchParams({
+            grant_type:'authorization_code', code,
+            redirect_uri: SPOTIFY_REDIRECT_URI, client_id: SPOTIFY_CLIENT_ID,
+            code_verifier: verifier,
+          })
+        });
+        const data = await resp.json();
+        if(data.access_token){
+          SPOTIFY.auth = {
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+            expires_at: Date.now() + (data.expires_in*1000) - 30000,
+          };
+          saveSpotifyAuth(SPOTIFY.auth);
+          SPOTIFY.lastError = null;
+        } else {
+          SPOTIFY.lastError = 'Token exchange failed: ' + (data.error_description || data.error || resp.status);
+        }
+      }catch(e){
+        SPOTIFY.lastError = 'Token exchange request failed: ' + e.message;
+      }
     }
-  }catch(e){}
+  }
+
+  // ALWAYS restore the saved screen state, whether login succeeded or not —
+  // previously this only ran on the success path, so any failure silently
+  // dumped the user back at the landing screen with no explanation, which is
+  // indistinguishable from "nothing happened."
   try{
     const raw = localStorage.getItem(SPOTIFY_RETURN_KEY);
     if(raw){
@@ -1595,6 +1613,7 @@ function renderSpotifyPanel(){
     el.innerHTML = `
       <div class="sp-head">Music</div>
       <p class="sp-note">Connect Spotify to play a playlist while this session runs. Requires Premium for in-app playback.</p>
+      ${SPOTIFY.lastError ? `<p class="sp-note sp-error">${SPOTIFY.lastError}</p>` : ''}
       <button class="btn btn-spotify" onclick="spotifyLogin()">Connect Spotify</button>`;
     return;
   }
