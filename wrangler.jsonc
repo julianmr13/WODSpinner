@@ -4,5 +4,12 @@
   "assets": {
     "directory": "./",
     "not_found_handling": "single-page-application"
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wodspinner-db",
+      "database_id": "caf33087-ba74-4f51-aa53-2d31974acccf"
+    }
+  ]
 }
