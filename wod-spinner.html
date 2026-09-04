@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WOD Spinner</title>
+<style>
+  :root{
+    --bg:#121417;
+    --panel:#1b1e23;
+    --panel-2:#23272d;
+    --border:#33383f;
+    --border-soft:#282c32;
+    --yellow:#f5c518;
+    --yellow-dim:#a98c1a;
+    --red:#e0483e;
+    --green:#4caf7d;
+    --orange:#f0913a;
+    --text:#f2f3f5;
+    --text-dim:#9aa0a8;
+    --text-faint:#5c6169;
+    --white:#ffffff;
+    --font-head:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  ::selection{background:var(--yellow);color:#121417;}
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:18px 32px;
+    border-bottom:1px solid var(--border-soft);
+    flex-shrink:0;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    cursor:pointer;
+    background:none;
+    border:none;
+    color:var(--text);
+    font-family:var(--font-head);
+    padding:0;
+  }
+  .brand-mark{
+    width:34px;height:34px;
+    background:var(--yellow);
+    display:flex;align-items:center;justify-content:center;
+    transform:rotate(-6deg);
+    flex-shrink:0;
+  }
+  .brand-mark svg{width:20px;height:20px;transform:rotate(6deg);}
+  .brand-name{
+    font-size:20px;
+    font-weight:800;
+    letter-spacing:0.02em;
+    text-transform:uppercase;
+  }
+  .nav-actions{display:flex;gap:8px;}
+  .nav-btn{
+    background:var(--panel);
+    border:1px solid var(--border);
+    color:var(--text-dim);
+    font-family:var(--font-body);
+    font-size:13px;
+    font-weight:600;
+    padding:9px 16px;
+    cursor:pointer;
+    transition:border-color .15s, color .15s;
+  }
+  .nav-btn:hover{border-color:var(--yellow-dim);color:var(--text);}
+  .nav-btn.active{border-color:var(--yellow);color:var(--yellow);}
+
+  /* ---------- Main container ---------- */
+  main{flex:1;display:flex;flex-direction:column;overflow:auto;}
+  .screen{flex:1;display:flex;flex-direction:column;padding:40px 32px;}
+  .screen-narrow{max-width:1100px;margin:0 auto;width:100%;}
+
+  .eyebrow-block{text-align:center;margin-bottom:36px;}
+  h1.page-title{
+    font-family:var(--font-head);
+    font-size:38px;
+    font-weight:800;
+    letter-spacing:0.01em;
+    margin:0 0 8px 0;
+  }
+  p.page-sub{
+    color:var(--text-dim);
+    font-size:15px;
+    margin:0;
+  }
+
+  /* ---------- Landing: group size grid ---------- */
+  .size-grid{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:16px;
+    max-width:820px;
+    margin:0 auto;
+    width:100%;
+  }
+  .size-tile{
+    aspect-ratio:1/1;
+    background:var(--panel);
+    border:1px solid var(--border);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    transition:transform .12s ease, border-color .12s, background .12s;
+    position:relative;
+  }
+  .size-tile:hover{border-color:var(--yellow);transform:translateY(-2px);}
+  .size-tile:active{transform:translateY(0);}
+  .size-tile .num{
+    font-family:var(--font-mono);
+    font-size:44px;
+    font-weight:700;
+    line-height:1;
+  }
+  .size-tile .label{
+    font-size:11px;
+    color:var(--text-faint);
+    margin-top:6px;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+  }
+  .size-tile.solo::before{
+    content:"SOLO / PAIR";
+  }
+
+  /* ---------- Picker: 4 columns ---------- */
+  .picker-header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:24px;
+    flex-wrap:wrap;
+    gap:12px;
+  }
+  .picker-header h2{
+    font-family:var(--font-head);
+    font-size:24px;
+    margin:0;
+  }
+  .picker-header .sub{color:var(--text-dim);font-size:14px;margin-top:4px;}
+  .picker-controls{display:flex;gap:10px;}
+  .btn{
+    font-family:var(--font-body);
+    font-weight:700;
+    font-size:13px;
+    padding:11px 20px;
+    border:1px solid var(--border);
+    background:var(--panel);
+    color:var(--text);
+    cursor:pointer;
+    transition:border-color .15s,background .15s;
+  }
+  .btn:hover{border-color:var(--yellow);}
+  .btn-primary{background:var(--yellow);color:#121417;border-color:var(--yellow);}
+  .btn-primary:hover{background:#ffd23f;}
+  .btn-ghost{background:transparent;}
+  .btn-back{padding:11px 18px 11px 14px;}
+
+  .spin-again-wrap{display:flex;justify-content:center;margin-top:32px;}
+  .btn-spin{
+    font-family:var(--font-head);
+    font-weight:800;
+    font-size:18px;
+    letter-spacing:.02em;
+    padding:18px 48px;
+    background:var(--yellow);
+    color:#121417;
+    border:none;
+    cursor:pointer;
+    transition:transform .1s, background .15s;
+  }
+  .btn-spin:hover{background:#ffd23f;transform:translateY(-2px);}
+  .btn-spin:active{transform:translateY(0);}
+
+  .card-row{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:16px;
+    align-items:stretch;
+  }
+  @media (max-width:1000px){
+    .card-row{grid-template-columns:repeat(2,1fr);}
+    .size-grid{grid-template-columns:repeat(3,1fr);}
+  }
+  .wod-card{
+    background:var(--panel);
+    border:1px solid var(--border);
+    display:flex;
+    flex-direction:column;
+    cursor:pointer;
+    transition:transform .12s, border-color .12s;
+    overflow:hidden;
+  }
+  .wod-card:hover{transform:translateY(-3px);border-color:var(--tier-color, var(--yellow));}
+  .wod-card-band{
+    height:6px;
+    background:var(--tier-color);
+  }
+  .wod-card-head{
+    padding:18px 18px 14px 18px;
+    border-bottom:1px solid var(--border-soft);
+  }
+  .wod-card-tier{
+    font-family:var(--font-mono);
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--tier-color);
+  }
+  .wod-card-duration{
+    font-family:var(--font-head);
+    font-size:30px;
+    font-weight:800;
+    margin-top:2px;
+  }
+  .wod-card-format{
+    font-size:13px;
+    color:var(--text-dim);
+    margin-top:2px;
+  }
+  .wod-card-body{padding:14px 18px;flex:1;display:flex;flex-direction:column;gap:8px;}
+  .wod-card-body .struct{
+    font-size:12px;
+    color:var(--text-faint);
+    font-family:var(--font-mono);
+    margin-bottom:4px;
+  }
+  .ex-line{
+    font-size:13px;
+    display:flex;
+    justify-content:space-between;
+    gap:8px;
+    padding:5px 0;
+    border-bottom:1px dashed var(--border-soft);
+  }
+  .ex-line:last-child{border-bottom:none;}
+  .ex-name{color:var(--text);}
+  .ex-amount{font-family:var(--font-mono);color:var(--text-dim);white-space:nowrap;}
+  .wod-card-foot{
+    padding:12px 18px;
+    border-top:1px solid var(--border-soft);
+    font-size:12px;
+    color:var(--text-faint);
+  }
+
+  /* ---------- Full screen workout ---------- */
+  .full-workout{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+  }
+  .full-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    margin-bottom:28px;
+    flex-wrap:wrap;
+    gap:16px;
+  }
+  .full-head-left .tier-tag{
+    font-family:var(--font-mono);
+    font-size:13px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    color:var(--tier-color);
+  }
+  .full-head-left h1{
+    font-family:var(--font-head);
+    font-size:42px;
+    margin:4px 0 6px 0;
+  }
+  .full-head-left .meta{color:var(--text-dim);font-size:15px;}
+  .full-actions{display:flex;gap:10px;}
+  .full-body{
+    flex:1;
+    display:grid;
+    grid-template-columns:1fr 400px;
+    gap:24px;
+    align-items:start;
+  }
+  .full-left{display:flex;flex-direction:column;gap:20px;min-width:0;}
+  @media (max-width:1050px){
+    .full-body{grid-template-columns:1fr;}
+  }
+  .full-notice{
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-left:4px solid var(--yellow);
+    padding:14px 18px;
+    font-size:14px;
+    color:var(--text-dim);
+    line-height:1.5;
+  }
+  .full-exlist{
+    background:var(--panel);
+    border:1px solid var(--border);
+  }
+  .full-exlist .row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:14px 22px;
+    border-bottom:1px solid var(--border-soft);
+    gap:16px;
+  }
+  .full-exlist .row:last-child{border-bottom:none;}
+  .full-exlist .exname{font-size:17px;font-weight:600;}
+  .full-exlist .excue{font-size:13px;color:var(--text-faint);margin-top:3px;max-width:640px;line-height:1.4;}
+  .full-exlist .examount{font-family:var(--font-mono);font-size:20px;color:var(--yellow);white-space:nowrap;flex-shrink:0;}
+  .full-exlist .row.trigger-row{background:var(--panel-2);}
+  .trigger-tag{
+    display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:700;
+    letter-spacing:.05em;color:#121417;background:var(--yellow);
+    padding:2px 6px;margin-left:8px;vertical-align:middle;
+  }
+  .trigger-tag.core-tag{background:var(--green);}
+
+  /* ---------- Timer ---------- */
+  .timer-panel{
+    background:var(--panel);
+    border:1px solid var(--border);
+    padding:26px 20px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:6px;
+    position:sticky;
+    top:20px;
+  }
+  .timer-phase{
+    font-family:var(--font-mono);
+    font-size:14px;
+    font-weight:700;
+    letter-spacing:.03em;
+    color:var(--tier-color, var(--yellow));
+    text-align:center;
+    min-height:20px;
+  }
+  .timer-display{
+    font-family:var(--font-mono);
+    font-size:68px;
+    font-weight:700;
+    line-height:1;
+    letter-spacing:.02em;
+    margin:8px 0;
+  }
+  .timer-display.warn{color:var(--red);}
+  .timer-meta{color:var(--text-dim);font-size:13px;}
+  .timer-total{color:var(--text-faint);font-size:12px;font-family:var(--font-mono);margin-bottom:16px;min-height:16px;}
+  .timer-controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
+  .timer-btn{
+    font-family:var(--font-body);
+    font-weight:700;
+    font-size:15px;
+    padding:14px 20px;
+    border:1px solid var(--border);
+    background:var(--panel-2);
+    color:var(--text);
+    cursor:pointer;
+    min-width:96px;
+    transition:border-color .15s, background .15s;
+  }
+  .timer-btn:hover{border-color:var(--yellow);}
+  .timer-btn.start{background:var(--green);border-color:var(--green);color:#0d1410;}
+  .timer-btn.start:hover{background:#5fc491;}
+  .timer-btn.pause{background:var(--yellow);border-color:var(--yellow);color:#121417;}
+  .timer-btn.pause:hover{background:#ffd23f;}
+  .timer-btn:disabled{opacity:.35;cursor:not-allowed;}
+
+  /* ---------- Settings & Favourites ---------- */
+  .panel-section{
+    background:var(--panel);
+    border:1px solid var(--border);
+    padding:22px;
+    margin-bottom:20px;
+  }
+  .panel-section h3{font-family:var(--font-head);font-size:17px;margin:0 0 14px 0;}
+  .equip-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
+  .equip-item{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 12px;
+    background:var(--panel-2);
+    border:1px solid var(--border-soft);
+    font-size:13px;
+    cursor:pointer;
+  }
+  .equip-item input{accent-color:var(--yellow);width:16px;height:16px;}
+  .ex-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .ex-table th{
+    text-align:left;color:var(--text-faint);font-weight:600;
+    text-transform:uppercase;letter-spacing:.04em;font-size:11px;
+    padding:8px 10px;border-bottom:1px solid var(--border);
+  }
+  .ex-table td{padding:9px 10px;border-bottom:1px solid var(--border-soft);}
+  .tag-pill{
+    display:inline-block;font-family:var(--font-mono);font-size:11px;
+    background:var(--panel-2);border:1px solid var(--border);
+    padding:2px 7px;color:var(--text-dim);
+  }
+  .fav-star{cursor:pointer;color:var(--text-faint);font-size:16px;background:none;border:none;}
+  .fav-star.active{color:var(--yellow);}
+  .del-btn{background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:13px;}
+  .del-btn:hover{color:var(--red);}
+  .add-ex-form{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+  .add-ex-form input, .add-ex-form select{
+    background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+    padding:8px 10px;font-size:13px;font-family:var(--font-body);
+  }
+
+  .fav-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
+  .fav-card{background:var(--panel);border:1px solid var(--border);padding:16px;cursor:pointer;}
+  .fav-card:hover{border-color:var(--yellow);}
+  .fav-card.disabled{opacity:.45;cursor:not-allowed;}
+  .fav-card h4{margin:0 0 4px 0;font-size:15px;}
+  .fav-card .fav-meta{font-size:12px;color:var(--text-faint);font-family:var(--font-mono);}
+  .fav-card .fav-missing{color:var(--red);font-size:11px;margin-top:8px;}
+  .fav-filter{margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-dim);}
+  .fav-filter select{background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:7px 10px;}
+  .empty-state{color:var(--text-faint);font-size:14px;padding:30px 0;text-align:center;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="brand" onclick="goHome()">
+    <span class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#121417" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M12 3 L12 21 M3 12 L21 12" stroke-width="1.5"/></svg>
+    </span>
+    <span class="brand-name">WOD Spinner</span>
+  </button>
+  <div class="nav-actions">
+    <button class="nav-btn" id="nav-fav" onclick="showFavourites()">Favourites</button>
+    <button class="nav-btn" id="nav-settings" onclick="showSettings()">Settings</button>
+  </div>
+</div>
+
+<main id="main"></main>
+
+<script>
+/* =========================================================
+   DATA MODEL
+   ========================================================= */
+
+const ROTATION_ONLY_EQUIP = new Set(['rack','cable','rower','skierg','bike','legpress','trx','ghd','treadmill','elliptical','rope']);
+
+const EQUIPMENT = [
+  {id:'bw', name:'Bodyweight / open space'},
+  {id:'db', name:'Dumbbells'},
+  {id:'kb', name:'Kettlebells'},
+  {id:'bb', name:'Barbell + plates (shared bar)'},
+  {id:'rack', name:'Squat rack (x1)'},
+  {id:'bench', name:'Bench'},
+  {id:'cable', name:'Cable trainer / pull-up station'},
+  {id:'rower', name:'Rower'},
+  {id:'skierg', name:'SkiErg'},
+  {id:'bike', name:'Assault bike'},
+  {id:'legpress', name:'Leg press'},
+  {id:'trx', name:'Suspension trainer (TRX)'},
+  {id:'ghd', name:'GHD / back extension'},
+  {id:'treadmill', name:'Treadmill'},
+  {id:'rope', name:'Battle rope'},
+  {id:'box', name:'Plyo box'},
+  {id:'slam', name:'Slam / medicine ball'},
+  {id:'sled', name:'Sled'},
+  {id:'vest', name:'Weighted vest (x1)'},
+  {id:'sandbag', name:'Sandbag (x1) / KB-sandbags (x2)'},
+  {id:'hangar', name:'Hangar space (runs, sprints)'},
+];
+
+// unit: reps | cal | time (seconds) | distance (metres, trigger only)
+const DEFAULT_EXERCISES = [
+  // PUSH
+  {id:'pushups', name:'Press-ups', pattern:'push', equip:['bw'], unit:'reps', base:12, intensity:1, cue:'Hands under shoulders, straight line head to heels, chest to floor.'},
+  {id:'db_press', name:'DB shoulder press', pattern:'push', equip:['db'], unit:'reps', base:10, intensity:2, cue:'Press straight overhead, ribs down, don\u2019t flare the elbows.'},
+  {id:'kb_push_press', name:'KB push press', pattern:'push', equip:['kb'], unit:'reps', base:10, intensity:2, cue:'Dip the knees slightly, drive up, punch the bell overhead.'},
+  {id:'bb_push_press', name:'Barbell push press', pattern:'push', equip:['bb','rack'], unit:'reps', base:8, intensity:3, cue:'Dip and drive from the legs, lock out overhead.'},
+  {id:'hr_pushup', name:'Hand-release push-ups', pattern:'push', equip:['bw'], unit:'reps', base:15, intensity:2, cue:'Chest to floor, lift both hands clear before pressing back up.'},
+  {id:'pike_pushup', name:'Pike push-ups', pattern:'push', equip:['bw'], unit:'reps', base:10, intensity:2, cue:'Hips high, lower the head toward the floor between the hands.'},
+  // PULL
+  {id:'pullups', name:'Pull-ups', pattern:'pull', equip:['cable'], unit:'reps', base:6, intensity:3, cue:'Full hang to chin over the bar, control the way down.'},
+  {id:'inverted_rows', name:'Inverted rows', pattern:'pull', equip:['trx'], unit:'reps', base:10, intensity:2, cue:'Body straight, pull the chest to the anchor point.'},
+  {id:'db_row', name:'DB bent-over row', pattern:'pull', equip:['db'], unit:'reps', base:10, intensity:2, cue:'Flat back, pull the elbow past the ribs.'},
+  {id:'kb_high_pull', name:'KB high pull', pattern:'pull', equip:['kb'], unit:'reps', base:10, intensity:2, cue:'Explosive hip drive, pull the elbow high and out.'},
+  {id:'rope_waves', name:'Battle rope waves', pattern:'pull', equip:['rope'], unit:'time', base:30, intensity:2, cue:'Stagger stance, brace the core, drive the waves from the shoulders.'},
+  {id:'lat_pulldown', name:'Lat pulldown', pattern:'pull', equip:['cable'], unit:'reps', base:12, intensity:1, cue:'Pull to the upper chest, elbows down and back.'},
+  {id:'cable_row', name:'Seated cable row', pattern:'pull', equip:['cable'], unit:'reps', base:12, intensity:1, cue:'Squeeze the shoulder blades together, don\u2019t lean back to cheat it.'},
+  // HINGE
+  {id:'kb_swings', name:'Kettlebell swings', pattern:'hinge', equip:['kb'], unit:'reps', base:15, intensity:2, cue:'Hinge at the hips, snap through, bell floats to chest height.'},
+  {id:'rdl_db', name:'DB Romanian deadlift', pattern:'hinge', equip:['db'], unit:'reps', base:10, intensity:2, cue:'Soft knees, push the hips back, feel the hamstring stretch.'},
+  {id:'rdl_bb', name:'Barbell RDL', pattern:'hinge', equip:['bb','rack'], unit:'reps', base:8, intensity:3, cue:'Bar stays close to the legs, flat back throughout.'},
+  {id:'sandbag_dl', name:'Sandbag deadlift', pattern:'hinge', equip:['sandbag'], unit:'reps', base:10, intensity:2, cue:'Hips back, chest up, drive through the heels.'},
+  {id:'broad_jump', name:'Broad jumps', pattern:'hinge', equip:['bw'], unit:'reps', base:8, intensity:2, cue:'Swing the arms, jump forward, stick the landing soft.'},
+  // SQUAT
+  {id:'air_squat', name:'Air squats', pattern:'squat', equip:['bw'], unit:'reps', base:20, intensity:1, cue:'Knees track over the toes, chest up, hips below parallel.'},
+  {id:'goblet_squat', name:'Goblet squat', pattern:'squat', equip:['kb'], unit:'reps', base:15, intensity:2, cue:'Elbows inside the knees at the bottom, drive up through the heels.'},
+  {id:'goblet_squat_db', name:'DB goblet squat', pattern:'squat', equip:['db'], unit:'reps', base:15, intensity:2, cue:'Hold the DB at the chest, sit back and down.'},
+  {id:'box_jump', name:'Box jumps', pattern:'squat', equip:['box'], unit:'reps', base:10, intensity:2, cue:'Full hip extension, land soft with the knees bent, stand tall to finish.'},
+  {id:'wall_sit', name:'Wall sit', pattern:'squat', equip:['bw'], unit:'time', base:40, intensity:2, cue:'Thighs parallel to the floor, back flat against the wall.'},
+  {id:'leg_press', name:'Leg press', pattern:'squat', equip:['legpress'], unit:'reps', base:15, intensity:1, cue:'Full range of motion, don\u2019t lock the knees out hard at the top.'},
+  // LUNGE
+  {id:'walking_lunge', name:'Walking lunges', pattern:'lunge', equip:['bw'], unit:'reps', base:20, intensity:1, cue:'Long stride, back knee light touch, drive through the front heel.'},
+  {id:'db_reverse_lunge', name:'DB reverse lunge to press', pattern:'lunge', equip:['db'], unit:'reps', base:12, intensity:2, cue:'Step back, press overhead as you stand back up.'},
+  {id:'kb_lateral_lunge', name:'KB lateral lunge', pattern:'lunge', equip:['kb'], unit:'reps', base:12, intensity:2, cue:'Sit back into the working hip, the other leg stays straight.'},
+  {id:'bulgarian_split', name:'Bulgarian split squat', pattern:'lunge', equip:['db','bench'], unit:'reps', base:10, intensity:2, cue:'Rear foot elevated, front knee tracks over the toes.'},
+  // CARRY
+  {id:'farmers_carry', name:"Farmer's carry", pattern:'carry', equip:['kb'], unit:'distance', base:40, intensity:2, trigger:true, cue:'Stand tall, shoulders back, grip hard, walk with control.'},
+  {id:'sandbag_carry', name:'Sandbag carry', pattern:'carry', equip:['sandbag'], unit:'time', base:40, intensity:2, cue:'Hug it tight to the chest, brace the core and walk.'},
+  {id:'vest_stepups', name:'Weighted vest step-ups', pattern:'carry', equip:['vest','box'], unit:'reps', base:15, intensity:2, cue:'Full stand on top of the box, control the step back down.'},
+  {id:'sandbag_getup', name:'Sandbag get-ups', pattern:'carry', equip:['sandbag'], unit:'reps', base:8, intensity:3, cue:'Hug the bag, roll to a lunge, stand up tall.'},
+  {id:'sled_push', name:'Sled push', pattern:'carry', equip:['sled','hangar'], unit:'distance', base:20, intensity:3, trigger:true, cue:'Low shin angle, drive through the legs, short quick steps.'},
+  {id:'sled_pull', name:'Sled pull', pattern:'carry', equip:['sled','hangar'], unit:'distance', base:20, intensity:3, trigger:true, cue:'Lean back, hand over hand, drive through the heels.'},
+  // CORE
+  {id:'plank', name:'Plank hold', pattern:'core', equip:['bw'], unit:'time', base:40, intensity:1, cue:'Straight line head to heels, brace the core, don\u2019t let the hips sag.'},
+  {id:'slam_throws', name:'Slam ball throws', pattern:'core', equip:['slam'], unit:'reps', base:15, intensity:2, cue:'Reach tall, drive the ball down hard, reset before the next rep.'},
+  {id:'hanging_knee_raise', name:'Hanging knee raises', pattern:'core', equip:['cable'], unit:'reps', base:12, intensity:2, cue:'Control the swing, knees to chest, no kipping.'},
+  {id:'ghd_situp', name:'GHD sit-ups', pattern:'core', equip:['ghd'], unit:'reps', base:15, intensity:2, cue:'Full range, touch the floor behind, drive back up.'},
+  {id:'situps', name:'Sit-ups', pattern:'core', equip:['bw'], unit:'reps', base:20, intensity:1, cue:'Feet anchored, chin tucked, control the descent.'},
+  {id:'russian_twist', name:'Russian twists', pattern:'core', equip:['slam'], unit:'reps', base:20, intensity:1, cue:'Lean back slightly, rotate from the ribs, feet up for harder.'},
+  // CARDIO
+  {id:'row_cal', name:'Row (calories)', pattern:'cardio', equip:['rower'], unit:'cal', base:15, intensity:2, cue:'Legs, then back, then arms \u2014 reverse the order on the way back.'},
+  {id:'skierg_cal', name:'SkiErg (calories)', pattern:'cardio', equip:['skierg'], unit:'cal', base:15, intensity:2, cue:'Hinge from the hips, pull the handles down to the thighs.'},
+  {id:'bike_cal', name:'Assault bike (calories)', pattern:'cardio', equip:['bike'], unit:'cal', base:15, intensity:2, cue:'Steady cadence, push and pull through the pedals with the arms.'},
+  {id:'burpees', name:'Burpees', pattern:'cardio', equip:['bw'], unit:'reps', base:12, intensity:3, cue:'Chest to floor, jump the feet in, full jump up to finish.'},
+  {id:'mountain_climbers', name:'Mountain climbers', pattern:'cardio', equip:['bw'], unit:'reps', base:24, intensity:2, cue:'Hips low, drive the knees to the chest, quick and controlled.'},
+  {id:'shuttle_runs', name:'Shuttle runs', pattern:'cardio', equip:['hangar'], unit:'reps', base:8, intensity:2, cue:'Touch the line, low turn, explode back the other way.'},
+  {id:'blue_mat_run', name:'Blue Mat run (~100m)', pattern:'cardio', equip:['hangar'], unit:'note', base:0, intensity:2, trigger:true, cue:'Steady pace out, quick turn, push the return.'},
+  {id:'h145_run', name:'H145 run (~180m)', pattern:'cardio', equip:['hangar'], unit:'note', base:0, intensity:3, trigger:true, cue:'Settle into a strong pace, controlled turn at the mark.'},
+  // POWER
+  {id:'kb_snatch', name:'KB snatch', pattern:'power', equip:['kb'], unit:'reps', base:8, intensity:3, cue:'One explosive pull, punch the bell overhead, lock out.'},
+  {id:'ball_over_shoulder', name:'Ball over shoulder toss', pattern:'power', equip:['slam'], unit:'reps', base:12, intensity:2, cue:'Squat to pick up, explosive hip drive to toss it over the shoulder.'},
+  {id:'jump_squat', name:'Jump squats', pattern:'power', equip:['bw'], unit:'reps', base:12, intensity:2, cue:'Full squat depth, explode up, land soft.'},
+];
+
+const PATTERNS = ['push','pull','hinge','squat','lunge','carry','core','cardio','power'];
+
+const FORMATS = {
+  amrap:{name:'AMRAP', groupPools:['solo','three','four','mid','large']},
+  emom:{name:'EMOM', groupPools:['solo','three','four','mid','large']},
+  tabata:{name:'Tabata', groupPools:['mid','large']},
+  circuit:{name:'Circuit / Stations', groupPools:['mid','large']},
+  partner:{name:'Partner', groupPools:['four','mid','large']},
+  fortime:{name:'For Time', groupPools:['solo','three']},
+  wrt:{name:'Work / Rest / Trigger', groupPools:['three','four']},
+};
+
+// Tier scaling (index 0=30min .. 3=45min)
+const TIER_LABELS = ['Easy','Moderate','Firm','Hard'];
+const TIER_MINUTES = [30,35,40,45];
+const TIER_MULT = [0.75, 0.9, 1.0, 1.2];
+const TIER_COLOR = ['var(--green)','var(--yellow)','var(--orange)','var(--red)'];
+
+function groupPool(size){
+  if(size<=2) return 'solo';
+  if(size===3) return 'three';
+  if(size===4) return 'four';
+  if(size>=5 && size<=8) return 'mid';
+  return 'large';
+}
+function wrtEligible(size){ return [3,4,6,8,12].includes(size); }
+
+function formatsForGroup(size){
+  const pool = groupPool(size);
+  let list = Object.keys(FORMATS).filter(f=>FORMATS[f].groupPools.includes(pool));
+  if(!wrtEligible(size)) list = list.filter(f=>f!=='wrt');
+  else if(!list.includes('wrt')) list.push('wrt');
+  if(size % 2 !== 0) list = list.filter(f=>f!=='partner'); // partner needs even numbers — no odd-one-out trios
+  return list;
+}
+
+/* =========================================================
+   STATE / PERSISTENCE
+   ========================================================= */
+const LS_KEY = 'wodspinner_v1';
+function loadState(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return {
+    equipmentOff: [],           // equipment ids toggled OFF
+    favouriteExerciseIds: [],
+    customExercises: [],
+    removedExerciseIds: [],
+    favouriteWorkouts: [],      // saved whole workouts
+    history: []                 // {ts, exerciseIds:[]}
+  };
+}
+let STATE = loadState();
+function saveState(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(STATE)); }catch(e){}
+}
+
+function allExercises(){
+  const removed = new Set(STATE.removedExerciseIds);
+  return [...DEFAULT_EXERCISES, ...STATE.customExercises].filter(e=>!removed.has(e.id));
+}
+function equipmentAvailable(id){ return !STATE.equipmentOff.includes(id); }
+function exerciseUsable(ex){ return ex.equip.every(equipmentAvailable); }
+function exerciseIsRotationOnly(ex){ return ex.equip.some(e=>ROTATION_ONLY_EQUIP.has(e)); }
+
+/* =========================================================
+   GENERATION LOGIC
+   ========================================================= */
+
+function recentlyUsedIds(days){
+  const cutoff = Date.now() - days*24*60*60*1000;
+  const ids = new Set();
+  STATE.history.filter(h=>h.ts>=cutoff).forEach(h=>h.exerciseIds.forEach(id=>ids.add(id)));
+  return ids;
+}
+
+function weightedPick(candidates, recentIds, usedThisWorkout){
+  const weighted = [];
+  candidates.forEach(ex=>{
+    if(usedThisWorkout.has(ex.id)) return;
+    let w = 1;
+    if(STATE.favouriteExerciseIds.includes(ex.id)) w *= 2.2;
+    if(recentIds.has(ex.id)) w *= 0.35;
+    for(let i=0;i<Math.round(w*10);i++) weighted.push(ex);
+  });
+  if(weighted.length===0) return null;
+  return weighted[Math.floor(Math.random()*weighted.length)];
+}
+
+// running-only movements — at most ONE of these should ever appear in a
+// single generated workout, whether it's picked as a regular work station or
+// as the WRT trigger. Farmer's carry / sled push-pull are excluded — they're
+// loaded carries/pushes, not runs, so they don't compete for this slot.
+const RUN_TYPE_IDS = new Set(['shuttle_runs','blue_mat_run','h145_run']);
+
+function pickExercisesForSession(format, groupSize, tierIdx, count){
+  const usable = allExercises().filter(exerciseUsable);
+  const rotationOk = format==='circuit' || format==='wrt' || groupSize<=2;
+  const pool = rotationOk ? usable : usable.filter(ex=>!exerciseIsRotationOnly(ex));
+  const triggerPool = usable.filter(ex=>ex.trigger);
+  const mainPool = pool.filter(ex=>!ex.trigger || format==='wrt');
+
+  const recentIds = recentlyUsedIds(7);
+  const patternCounts = {};
+  const chosen = [];
+  const usedThisWorkout = new Set();
+  const hasRunType = ()=> chosen.some(c=>RUN_TYPE_IDS.has(c.id));
+
+  // primary pass: enforce pattern diversity (max 2/pattern) and at least one cardio
+  let attempts = 0;
+  while(chosen.length < count && attempts < count*12){
+    attempts++;
+    const needsCardio = chosen.length===0 || (!chosen.some(c=>c.pattern==='cardio') && chosen.length===count-1);
+    let candidates = mainPool.filter(ex=>{
+      const pc = patternCounts[ex.pattern]||0;
+      if(pc>=2) return false;
+      if(needsCardio && ex.pattern!=='cardio') return false;
+      if(RUN_TYPE_IDS.has(ex.id) && hasRunType()) return false;
+      return true;
+    });
+    if(candidates.length===0) candidates = mainPool.filter(ex=>(patternCounts[ex.pattern]||0)<2 && !(RUN_TYPE_IDS.has(ex.id) && hasRunType()));
+    const pick = weightedPick(candidates, recentIds, usedThisWorkout);
+    if(!pick) break;
+    chosen.push(pick);
+    usedThisWorkout.add(pick.id);
+    patternCounts[pick.pattern] = (patternCounts[pick.pattern]||0)+1;
+  }
+
+  // fallback pass: guarantee the exact requested count so blocks/stations always
+  // match the number of exercises shown. Relaxes the pattern cap first (reusing
+  // unused exercises), then allows repeats if the equipment pool is genuinely thin.
+  // Still respects the one-run-type rule throughout.
+  let guard = 0;
+  while(chosen.length < count && mainPool.length > 0 && guard < 50){
+    guard++;
+    const allowed = mainPool.filter(ex=>!(RUN_TYPE_IDS.has(ex.id) && hasRunType()));
+    const unused = allowed.filter(ex=>!usedThisWorkout.has(ex.id));
+    const source = unused.length ? unused : allowed;
+    if(source.length===0) break;
+    const pick = weightedPick(source, recentIds, new Set());
+    if(!pick) break;
+    chosen.push(pick);
+    usedThisWorkout.add(pick.id);
+  }
+  return {chosen, triggerPool};
+}
+
+function scaledAmount(ex, tierIdx){
+  const mult = TIER_MULT[tierIdx];
+  if(ex.unit==='reps') return Math.max(4, Math.round(ex.base*mult/2)*2);
+  if(ex.unit==='cal') return Math.max(5, Math.round(ex.base*mult));
+  if(ex.unit==='time') return Math.max(15, Math.round(ex.base*mult/5)*5);
+  return null;
+}
+function amountLabel(ex, tierIdx){
+  const amt = scaledAmount(ex, tierIdx);
+  if(ex.unit==='reps') return amt+' reps';
+  if(ex.unit==='cal') return amt+' cal';
+  if(ex.unit==='time') return amt+'s';
+  // 'distance' and 'note' units are only meant for trigger exercises, which
+  // never render through this path (WRT overrides their label, and every
+  // other format filters trigger:true exercises out entirely). If one somehow
+  // ends up here anyway — e.g. a custom exercise added via Settings with an
+  // unrecognised unit — fall back to a reps-style number rather than going
+  // blank with no target at all.
+  if(!ex.trigger && ex.base>0) return Math.max(4, Math.round(ex.base*(TIER_MULT[tierIdx]||1)/2)*2)+' reps';
+  return '';
+}
+
+// ---- circuit timing: one shared, deterministic source of truth ----
+// work+rest always sums to exactly 60s per tier by design, so given a station
+// count, the round count that best hits the tier's target duration can be
+// solved directly rather than guessed — and since every place that needs
+// rounds calls this same pure function with the same (tierIdx, stations)
+// inputs, it can never drift out of sync with what's actually displayed.
+function circuitWorkRest(tierIdx){
+  return {work:[30,35,40,45][tierIdx], rest:[30,25,20,15][tierIdx]};
+}
+function circuitRoundsFor(tierIdx, stations){
+  const {work, rest} = circuitWorkRest(tierIdx);
+  const targetSec = TIER_MINUTES[tierIdx]*60;
+  return Math.max(2, Math.round(targetSec/(stations*(work+rest))));
+}
+// picks the station count (>= groupSize, ideally close to it) that gets the
+// resulting rounds*stations*cycle time closest to the tier's target duration
+function pickCircuitStations(tierIdx, groupSize){
+  const baseStations = [4,5,5,6][tierIdx];
+  const minStations = Math.max(baseStations, groupSize);
+  const {work, rest} = circuitWorkRest(tierIdx);
+  const targetSec = TIER_MINUTES[tierIdx]*60;
+  let best = null;
+  for(let stations=minStations; stations<=minStations+3; stations++){
+    const rounds = circuitRoundsFor(tierIdx, stations);
+    const total = rounds*stations*(work+rest) - rest; // minus the final trailing rest, which gets skipped
+    const err = Math.abs(total-targetSec);
+    if(!best || err<best.err) best = {stations, err};
+  }
+  return best.stations;
+}
+
+// how many exercises/stations/blocks each format wants for a given tier —
+// the single source of truth so the count shown always matches what's listed
+function requestedExerciseCount(format, tierIdx, groupSize){
+  switch(format){
+    // circuit stations: solved jointly with rounds to hit the tier's target
+    // duration, never fewer than the number of people.
+    case 'circuit': return pickCircuitStations(tierIdx, groupSize);
+    case 'wrt': return [4,5,5,6][tierIdx];
+    case 'tabata': return [4,5,6,7][tierIdx];
+    case 'emom': return [3,4,4,5][tierIdx];
+    case 'partner': return [4,4,5,5][tierIdx];
+    case 'amrap': return [4,5,5,6][tierIdx];
+    case 'fortime': return [4,5,6,6][tierIdx];
+    default: return 5;
+  }
+}
+
+// n = the ACTUAL number of exercises chosen (always == requestedExerciseCount,
+// but built from it explicitly so structure text can never drift out of sync)
+function buildStructureText(format, tierIdx, n){
+  const min = TIER_MINUTES[tierIdx];
+  switch(format){
+    case 'amrap':{
+      const blocks = tierIdx<2?2:3;
+      const per = [12,14,11,13][tierIdx];
+      const rest = [3,2,2,1.5][tierIdx];
+      return `${blocks} x ${per} min AMRAP, ${rest} min rest between`;
+    }
+    case 'emom':{
+      const cycles = (min/n).toFixed(1).replace(/\.0$/,'');
+      return `${min} min EMOM &middot; ${n} exercises on loop, 1 min each (~${cycles} laps)`;
+    }
+    case 'tabata':{
+      const restArr=[90,90,60,45];
+      return `${n} blocks x (20s work / 10s rest x8), ${restArr[tierIdx]}s rest between blocks`;
+    }
+    case 'circuit':{
+      const rounds = circuitRoundsFor(tierIdx, n);
+      const {work, rest} = circuitWorkRest(tierIdx);
+      return `${n} stations, ${rounds} rounds, ${work}s work / ${rest}s rest`;
+    }
+    case 'partner':{
+      const rounds=[3,4,4,5][tierIdx];
+      return `${rounds} rounds, split work with your partner`;
+    }
+    case 'fortime':{
+      return `For time \u2014 rest as needed, ${min}-min cap`;
+    }
+    case 'wrt':{
+      return `Teams rotate: one works, one rests, one runs the trigger`;
+    }
+  }
+  return '';
+}
+
+// splits a group as evenly as possible into `stations` clusters, e.g. 7 into 4 -> [2,2,2,1]
+function stationGroups(groupSize, stations){
+  const base = Math.floor(groupSize/stations);
+  const rem = groupSize % stations;
+  const groups = [];
+  for(let i=0;i<stations;i++) groups.push(base + (i<rem?1:0));
+  return groups.filter(g=>g>0);
+}
+
+// explains HOW a group actually moves through the format — short version for
+// the card footer, longer version for the full-screen instruction notice
+function buildGroupingNote(w){
+  const n = w.exercises.length;
+  switch(w.format){
+    case 'circuit':{
+      if(n >= w.groupSize){
+        const spare = n - w.groupSize;
+        return {
+          short: spare>0 ? `1 person/station (${spare} spare)` : `1 person per station`,
+          detail: `Every person gets their own station to start${spare>0?` \u2014 there ${spare===1?'is':'are'} ${spare} extra station${spare===1?'':'s'} beyond what's needed, so no one's ever waiting on someone else to finish.`:', so no one waits on anyone else.'} Rotate to the next station at the end of every round.`
+        };
+      }
+      const groups = stationGroups(w.groupSize, n);
+      return {
+        short: `${groups.length} groups (${groups.join('/')}) rotating`,
+        detail: `Split into ${groups.length} groups of ${groups.join('/')} people, one group per station to start. At the end of every round, each group moves to the next station, until everyone has hit all ${groups.length} stations.`
+      };
+    }
+    case 'partner':{
+      const pairs = Math.floor(w.groupSize/2);
+      const leftover = w.groupSize%2;
+      const short = leftover ? `${pairs} pairs + 1 trio` : `${pairs} pairs`;
+      return {
+        short,
+        detail: `Pair up${leftover?` \u2014 ${pairs} pairs, plus one team of three`:''}. One partner works the current exercise while the other rests; swap every round.${leftover?' The trio rotates three-way: work / rest / rest.':''}`
+      };
+    }
+    case 'emom':{
+      const cycles = (w.duration/n).toFixed(1).replace(/\.0$/,'');
+      return {
+        short: `${n} exercises on loop`,
+        detail: `Everyone does the same exercise together, one exercise per minute, looping back to the top of the list once you reach the end \u2014 about ${cycles} laps across the ${w.duration} minutes.`
+      };
+    }
+    case 'tabata':{
+      return {
+        short: `${n} exercises, one per block`,
+        detail: `Each block is one exercise, worked by everyone at once: 20s on / 10s off, x8. With more blocks than exercises the list repeats from the top. The 10s gap is for resetting position, not queuing for kit \u2014 every exercise here is bodyweight or personal-equipment so nobody's sharing a station.`
+      };
+    }
+    case 'amrap':{
+      return { short:'Everyone works together', detail:'Everyone moves through the exercise list together each block, completing as many rounds as possible before the block ends.' };
+    }
+    case 'fortime':{
+      return { short:'Self-paced, rest as needed', detail:'Everyone completes the full exercise list for the stated reps at their own pace \u2014 break up sets and rest whenever needed. The time cap is a backstop, not a target; most groups finish well inside it.' };
+    }
+    case 'wrt':{
+      const teamsPhrase = w.numTeams>1 ? `${w.numTeams} teams of ${w.teamSize}` : `Team of ${w.teamSize}`;
+      const parallelNote = w.numTeams>1 ? ', running in parallel \u2014 assign each team a different starting station and swap at the halfway point (Round 1 / Round 2) so nobody queues for the same kit.' : '.';
+      if(w.teamSize===4){
+        return {
+          short: teamsPhrase,
+          detail: `${teamsPhrase}${parallelNote} Four roles rotate every cycle: one works the current station, one holds the core role (${w.coreRoleExercise}), one rests, one runs the trigger exercise (${w.trigger}). When the trigger returns: runner rests, rester takes the core role, core role moves to the station, worker becomes the runner.`
+        };
+      }
+      return {
+        short: teamsPhrase,
+        detail: `${teamsPhrase}${parallelNote} One person works the current station, one rests, one runs the trigger exercise (${w.trigger}). When the trigger returns: runner rests, rester takes the station, worker becomes the runner.`
+      };
+    }
+  }
+  return {short:'', detail:''};
+}
+
+function pickTeamSize(groupSize){
+  const opts=[];
+  if(groupSize%3===0) opts.push(3);
+  if(groupSize%4===0) opts.push(4);
+  if(opts.length===0) return null;
+  return opts[Math.floor(Math.random()*opts.length)];
+}
+// equipment that only exists as a single unit — fine for one team's trigger,
+// but can't be the trigger for MULTIPLE teams running in parallel, since only
+// one team could physically use it at a time
+const SCARCE_SINGLE_EQUIP = new Set(['sled','vest','sandbag']);
+
+function pickTrigger(triggerPool, tierIdx, numTeams, excludeRunTypes){
+  let pool = triggerPool;
+  if(numTeams>1){
+    const spareEnough = pool.filter(t=>!t.equip.some(e=>SCARCE_SINGLE_EQUIP.has(e)));
+    if(spareEnough.length>0) pool = spareEnough;
+  }
+  if(excludeRunTypes){
+    const noRun = pool.filter(t=>!RUN_TYPE_IDS.has(t.id));
+    if(noRun.length>0) pool = noRun;
+  }
+  if(pool.length===0) return null;
+  const preferHard = tierIdx>=2;
+  const hard = pool.filter(t=>t.id==='h145_run'||t.id==='sled_push'||t.id==='sled_pull');
+  const easy = pool.filter(t=>t.id==='blue_mat_run'||t.id==='farmers_carry');
+  const list = preferHard && hard.length ? hard : (easy.length?easy:pool);
+  return list[Math.floor(Math.random()*list.length)];
+}
+
+function generateWorkout(format, groupSize, tierIdx){
+  const requestedCount = requestedExerciseCount(format, tierIdx, groupSize);
+  const {chosen, triggerPool} = pickExercisesForSession(format, groupSize, tierIdx, requestedCount);
+
+  const workout = {
+    id: 'w'+Date.now()+'_'+Math.floor(Math.random()*9999),
+    format, groupSize, tierIdx,
+    duration: TIER_MINUTES[tierIdx],
+    exercises: chosen.map(ex=>({id:ex.id, name:ex.name, pattern:ex.pattern, unit:ex.unit, cue:ex.cue||'', intensity:ex.intensity||2, amountLabel: amountLabel(ex,tierIdx)})),
+    createdAt: Date.now(),
+  };
+
+  // Tabata and Circuit already impose a fixed work duration on every exercise
+  // (the block/station timer) — showing a separate scaled time figure on a
+  // time-based exercise (e.g. "Battle rope waves 25s" inside a 20s block) just
+  // conflicts with that. Drop the redundant label; the block/station timing
+  // in the structure line already covers it.
+  if(format==='tabata' || format==='circuit'){
+    workout.exercises = workout.exercises.map(e=>
+      e.unit==='time' ? {...e, amountLabel:''} : e
+    );
+  }
+
+  if(format==='wrt'){
+    const teamSize = pickTeamSize(groupSize) || 3;
+    const numTeams = Math.floor(groupSize/teamSize);
+    const workHasRunType = workout.exercises.some(e=>RUN_TYPE_IDS.has(e.id));
+    const trig = pickTrigger(triggerPool, tierIdx, numTeams, workHasRunType)
+      || (workHasRunType ? allExercises().find(e=>e.id==='farmers_carry') : allExercises().find(e=>e.id==='blue_mat_run'))
+      || allExercises().find(e=>e.id==='blue_mat_run');
+    workout.teamSize = teamSize;
+    workout.numTeams = numTeams;
+    workout.trigger = trig.name;
+    workout.roundSwap = numTeams>1;
+    // reps convention: flat target reps/cal per station (e.g. "100")
+    const target = [60,80,100,120][tierIdx];
+    workout.exercises = workout.exercises.map(e=>({
+      ...e, amountLabel: e.unit==='cal' ? target+' cal' : (e.unit==='time'? target+'s' : target+' reps')
+    }));
+    // the trigger exercise runs every rotation but was previously only
+    // mentioned in the instructions, never actually listed — add it as its
+    // own row so it shows up alongside the work stations
+    workout.exercises.push({
+      id: trig.id, name: trig.name, pattern: trig.pattern, unit: trig.unit,
+      cue: trig.cue || '', intensity: trig.intensity||2, amountLabel: 'Trigger \u2014 every rotation', isTrigger: true
+    });
+    // teams of 4 get a fourth concurrent role — work / core / rest / trigger —
+    // not just work / rest / trigger. Add a dedicated core-role exercise,
+    // separate from the rotating work stations, same treatment as the trigger.
+    if(teamSize===4){
+      const usableCore = allExercises().filter(ex=>ex.pattern==='core' && exerciseUsable(ex) && !ex.trigger);
+      const notAlreadyUsed = usableCore.filter(ex=>!workout.exercises.some(w=>w.id===ex.id));
+      const corePool = notAlreadyUsed.length ? notAlreadyUsed : usableCore;
+      const coreEx = corePool.length ? corePool[Math.floor(Math.random()*corePool.length)] : allExercises().find(e=>e.id==='plank');
+      workout.coreRoleExercise = coreEx.name;
+      workout.exercises.push({
+        id: coreEx.id, name: coreEx.name, pattern: coreEx.pattern, unit: coreEx.unit,
+        cue: coreEx.cue || '', intensity: coreEx.intensity||2,
+        amountLabel: coreEx.unit==='time' ? 'Core role \u2014 continuous' : 'Core role \u2014 every rotation',
+        isCoreRole: true
+      });
+    }
+  }
+
+  // built AFTER exercises (and, for wrt, team info) are finalised, so the
+  // block/station count and grouping notes always match what's actually shown
+  workout.structure = buildStructureText(format, tierIdx, workout.exercises.length);
+  workout.grouping = buildGroupingNote(workout);
+  return workout;
+}
+
+// ---- composite difficulty scoring ----
+// Measures each candidate's ACTUAL demand rather than trusting which preset
+// tier it was generated from. Three signals:
+//  1. work ratio — fraction of total time actually spent working (not resting)
+//  2. average exercise intensity — 1-3 tag per exercise, physical demand
+//  3. actual duration — longer sessions accumulate more fatigue (light weight,
+//     since duration alone is exactly the unreliable signal this replaces)
+function candidateDifficultyScore(w){
+  let workRatio, actualSeconds;
+  if(['amrap','emom','tabata','circuit'].includes(w.format)){
+    const prog = buildTimerProgram(w);
+    const workSec = prog.phases.filter(p=>p.kind==='work').reduce((s,p)=>s+p.seconds,0);
+    const totalSec = prog.phases.reduce((s,p)=>s+p.seconds,0);
+    workRatio = totalSec>0 ? workSec/totalSec : 1;
+    actualSeconds = totalSec;
+  } else if(w.format==='wrt'){
+    // each person only works one rotation slot in teamSize — genuinely less
+    // individual work time than it looks like from the exercise list alone
+    workRatio = 1/w.teamSize;
+    actualSeconds = w.duration*60;
+  } else if(w.format==='partner'){
+    workRatio = 0.5; // work is split with a partner
+    actualSeconds = w.duration*60;
+  } else {
+    workRatio = 0.85; // for time: self-paced but close to continuous
+    actualSeconds = w.duration*60;
+  }
+  const avgIntensity = w.exercises.reduce((s,e)=>s+(e.intensity||2),0) / Math.max(1,w.exercises.length);
+  const intensityNorm = (avgIntensity-1)/2; // 1-3 scale -> 0-1
+  const durationNorm = Math.min(actualSeconds/(50*60), 1); // cap contribution around 50min
+  w._actualSeconds = actualSeconds;
+  return 0.5*workRatio + 0.35*intensityNorm + 0.15*durationNorm;
+}
+
+// picks k candidates spread across the sorted (ascending difficulty) pool —
+// slicing into k sequential buckets guarantees non-decreasing difficulty by
+// construction, then prefers format variety within each bucket
+function pickSpread(sorted, k){
+  const n = sorted.length;
+  const bucketSize = Math.max(1, Math.floor(n/k));
+  const picks = [];
+  const usedFormats = new Set();
+  for(let i=0;i<k;i++){
+    const start = i*bucketSize;
+    const end = (i===k-1) ? n : Math.min(n, start+bucketSize);
+    let bucket = sorted.slice(start, end);
+    if(bucket.length===0) bucket = [sorted[Math.min(n-1, start)]];
+    let choices = bucket.filter(w=>!usedFormats.has(w.format));
+    if(choices.length===0) choices = bucket;
+    const pick = choices[Math.floor(Math.random()*choices.length)];
+    usedFormats.add(pick.format);
+    picks.push(pick);
+  }
+  return picks;
+}
+
+function generateFour(groupSize){
+  const pool = formatsForGroup(groupSize);
+  const candidates = [];
+  pool.forEach(format=>{
+    for(let presetTier=0; presetTier<4; presetTier++){
+      const w = generateWorkout(format, groupSize, presetTier);
+      w._score = candidateDifficultyScore(w);
+      candidates.push(w);
+    }
+  });
+  candidates.sort((a,b)=>a._score-b._score);
+  const picks = pickSpread(candidates, 4);
+  // displayTier = rank position (0-3), independent of the preset tier that
+  // was used to build the numbers — that preset stays on w.tierIdx untouched,
+  // so the timer/structure text (already computed) never gets recalculated
+  // against a mismatched tier.
+  picks.forEach((w,i)=>{
+    w.displayTier = i;
+    w.duration = Math.round((w._actualSeconds||w.duration*60)/60);
+  });
+  return picks;
+}
+
+function recordHistory(workout){
+  STATE.history.push({ts:Date.now(), exerciseIds:workout.exercises.map(e=>e.id)});
+  // keep last 60 days only
+  const cutoff = Date.now()-60*24*60*60*1000;
+  STATE.history = STATE.history.filter(h=>h.ts>=cutoff);
+  saveState();
+}
+
+/* =========================================================
+   TIMER
+   ========================================================= */
+
+// Builds a sequence of phases {label, seconds, kind:'work'|'rest'|'lead'} for
+// formats where the generator already defines per-exercise timing (amrap,
+// emom, tabata, circuit). Other formats (partner, fortime, wrt) don't have
+// enough structure defined to auto-derive sub-intervals, so they get a single
+// simple countdown of the full session length instead.
+function buildTimerProgram(w){
+  const ex = w.exercises;
+  const n = ex.length;
+  const phases = [];
+
+  if(w.format==='amrap'){
+    const blocks = w.tierIdx<2?2:3;
+    const per = [12,14,11,13][w.tierIdx];
+    const rest = [3,2,2,1.5][w.tierIdx];
+    for(let b=0;b<blocks;b++){
+      phases.push({label:`AMRAP \u2014 block ${b+1} of ${blocks}`, seconds:per*60, kind:'work'});
+      if(b<blocks-1) phases.push({label:'Rest', seconds:Math.round(rest*60), kind:'rest'});
+    }
+    return {mode:'intervals', phases};
+  }
+
+  if(w.format==='emom'){
+    for(let m=0;m<w.duration;m++){
+      const exr = ex[m%n];
+      phases.push({label:`Minute ${m+1} \u2014 ${exr.name}`, seconds:60, kind:'work'});
+    }
+    return {mode:'intervals', phases};
+  }
+
+  if(w.format==='tabata'){
+    const restBetween = [90,90,60,45][w.tierIdx];
+    for(let b=0;b<n;b++){
+      for(let r=0;r<8;r++){
+        phases.push({label:`${ex[b].name} \u2014 round ${r+1}/8`, seconds:20, kind:'work'});
+        if(!(b===n-1 && r===7)) phases.push({label:'Rest', seconds:10, kind:'rest'});
+      }
+      if(b<n-1) phases.push({label:'Rest between blocks', seconds:restBetween, kind:'rest'});
+    }
+    return {mode:'intervals', phases};
+  }
+
+  if(w.format==='circuit'){
+    const rounds = circuitRoundsFor(w.tierIdx, n);
+    const {work, rest} = circuitWorkRest(w.tierIdx);
+    for(let r=0;r<rounds;r++){
+      for(let s=0;s<n;s++){
+        phases.push({label:`${ex[s].name} \u2014 round ${r+1}/${rounds}`, seconds:work, kind:'work'});
+        const isLast = (r===rounds-1 && s===n-1);
+        if(!isLast) phases.push({label:'Rest / rotate', seconds:rest, kind:'rest'});
+      }
+    }
+    return {mode:'intervals', phases};
+  }
+
+  // partner / fortime / wrt: no per-exercise timing defined yet — simple countdown
+  return {mode:'simple', phases:[{label:FORMATS[w.format].name, seconds:w.duration*60, kind:'work'}]};
+}
+
+let TIMER = null; // {program, phaseIndex, remaining, running, endTs, warned, tickHandle}
+
+function clearTimerInterval(){
+  if(TIMER && TIMER.tickHandle){ clearInterval(TIMER.tickHandle); TIMER.tickHandle=null; }
+}
+
+let audioCtx = null;
+function getAudioCtx(){
+  if(!audioCtx){
+    try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ audioCtx=null; }
+  }
+  return audioCtx;
+}
+function beep(freq, durMs, vol, waveform){
+  const ctx = getAudioCtx();
+  if(!ctx) return;
+  try{
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = waveform || 'sine';
+    osc.frequency.value = freq;
+    const now = ctx.currentTime;
+    const dur = durMs/1000;
+    // quick fade in/out avoids clicky edges, especially on the square wave
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(vol, now+0.012);
+    gain.gain.setValueAtTime(vol, now+Math.max(0.02, dur-0.04));
+    gain.gain.linearRampToValueAtTime(0, now+dur);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now+dur);
+  }catch(e){}
+}
+function playWarnBeep(){ beep(740,90,0.14,'sine'); }              // soft, short "bip"
+function playIntervalEndBeep(){ beep(950,600,0.55,'square'); }    // sharp, prominent "beeeep"
+
+function initTimer(workout){
+  clearTimerInterval();
+  const program = buildTimerProgram(workout);
+  TIMER = {
+    program,
+    format: workout.format,
+    phaseIndex:0,
+    remaining:program.phases[0].seconds,
+    running:false,
+    endTs:null,
+    warned:new Set(),
+    tickHandle:null,
+  };
+  renderTimerPanel();
+}
+
+function timerTotalPhases(){ return TIMER ? TIMER.program.phases.length : 0; }
+
+function timerStart(){
+  if(!TIMER) return;
+  getAudioCtx(); // unlock audio on user gesture
+  if(TIMER.running) return;
+  TIMER.running = true;
+  TIMER.endTs = Date.now() + TIMER.remaining*1000;
+  TIMER.tickHandle = setInterval(timerTick, 200);
+  updateTimerButtons();
+}
+function timerPause(){
+  if(!TIMER || !TIMER.running) return;
+  TIMER.remaining = Math.max(0, Math.ceil((TIMER.endTs - Date.now())/1000));
+  clearTimerInterval();
+  TIMER.running = false;
+  updateTimerButtons();
+}
+function timerResetTo(phaseIdx){
+  if(!TIMER) return;
+  clearTimerInterval();
+  TIMER.phaseIndex = phaseIdx;
+  TIMER.remaining = TIMER.program.phases[phaseIdx].seconds;
+  TIMER.running = false;
+  TIMER.endTs = null;
+  TIMER.warned = new Set();
+  renderTimerPanel();
+}
+function timerReset(){ timerResetTo(0); }
+
+function timerTick(){
+  if(!TIMER || !TIMER.running) return;
+  const remainingMs = TIMER.endTs - Date.now();
+  const remaining = Math.max(0, Math.ceil(remainingMs/1000));
+  if(remaining!==TIMER.remaining){
+    TIMER.remaining = remaining;
+    if(remaining<=3 && remaining>0 && !TIMER.warned.has(remaining)){
+      TIMER.warned.add(remaining);
+      playWarnBeep();
+    }
+  }
+  if(remainingMs<=0){
+    playIntervalEndBeep();
+    const nextIdx = TIMER.phaseIndex+1;
+    if(nextIdx >= TIMER.program.phases.length){
+      // workout complete
+      clearTimerInterval();
+      TIMER.running = false;
+      TIMER.phaseIndex = TIMER.program.phases.length-1;
+      TIMER.remaining = 0;
+      updateTimerDisplay();
+      updateTimerButtons();
+      return;
+    }
+    TIMER.phaseIndex = nextIdx;
+    TIMER.remaining = TIMER.program.phases[nextIdx].seconds;
+    TIMER.warned = new Set();
+    TIMER.endTs = Date.now() + TIMER.remaining*1000;
+  }
+  updateTimerDisplay();
+}
+
+function fmtClock(sec){
+  const m = Math.floor(sec/60), s = sec%60;
+  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+function timerTotalRemaining(){
+  if(!TIMER) return 0;
+  let total = TIMER.remaining;
+  for(let i=TIMER.phaseIndex+1;i<TIMER.program.phases.length;i++) total += TIMER.program.phases[i].seconds;
+  return total;
+}
+function updateTimerDisplay(){
+  if(!TIMER) return;
+  const disp = document.getElementById('timer-display');
+  const phaseEl = document.getElementById('timer-phase');
+  const metaEl = document.getElementById('timer-meta');
+  const totalEl = document.getElementById('timer-total');
+  if(!disp) return;
+  const phase = TIMER.program.phases[TIMER.phaseIndex];
+  disp.textContent = fmtClock(TIMER.remaining);
+  disp.classList.toggle('warn', TIMER.remaining<=3 && TIMER.remaining>0 && TIMER.running);
+  phaseEl.textContent = phase.label + (phase.kind==='rest' ? ' \u2014 REST' : '');
+  if(TIMER.program.mode==='intervals'){
+    metaEl.textContent = `Phase ${TIMER.phaseIndex+1} of ${timerTotalPhases()}`;
+    if(totalEl) totalEl.textContent = `Total time left: ${fmtClock(timerTotalRemaining())}`;
+  } else {
+    metaEl.textContent = TIMER.remaining===0 ? 'Time\u2019s up' : (TIMER.format==='fortime' ? 'Time cap \u2014 rest as needed, beat the clock' : 'Total session countdown');
+    if(totalEl) totalEl.textContent = '';
+  }
+}
+function updateTimerButtons(){
+  const startBtn = document.getElementById('timer-start-btn');
+  const pauseBtn = document.getElementById('timer-pause-btn');
+  if(!startBtn) return;
+  startBtn.disabled = !!(TIMER && TIMER.running);
+  startBtn.textContent = (TIMER && TIMER.remaining===0 && TIMER.phaseIndex===TIMER.program.phases.length-1 && !TIMER.running) ? 'Done' : 'Start';
+  pauseBtn.disabled = !(TIMER && TIMER.running);
+}
+function renderTimerPanel(){
+  updateTimerDisplay();
+  updateTimerButtons();
+}
+
+
+const $main = document.getElementById('main');
+let APP = {screen:'landing', groupSize:null, four:[], selected:null};
+
+function goHome(){ clearTimerInterval(); APP.screen='landing'; render(); }
+function showFavourites(){ clearTimerInterval(); APP.screen='favourites'; render(); }
+function showSettings(){ clearTimerInterval(); APP.screen='settings'; render(); }
+
+function setNavActive(){
+  document.getElementById('nav-fav').classList.toggle('active', APP.screen==='favourites');
+  document.getElementById('nav-settings').classList.toggle('active', APP.screen==='settings');
+}
+
+function render(){
+  setNavActive();
+  if(APP.screen==='landing') return renderLanding();
+  if(APP.screen==='picker') return renderPicker();
+  if(APP.screen==='full') return renderFull();
+  if(APP.screen==='settings') return renderSettings();
+  if(APP.screen==='favourites') return renderFavourites();
+}
+
+function renderLanding(){
+  let tiles='';
+  for(let i=1;i<=12;i++){
+    tiles += `<div class="size-tile" onclick="selectGroupSize(${i})">
+      <div class="num">${i}</div>
+      <div class="label">${i===1?'solo':i<=2?'pair':'people'}</div>
+    </div>`;
+  }
+  $main.innerHTML = `
+    <div class="screen">
+      <div class="screen-narrow">
+        <div class="eyebrow-block">
+          <h1 class="page-title">How many training today?</h1>
+          <p class="page-sub">Pick the head count — the generator builds around it.</p>
+        </div>
+        <div class="size-grid">${tiles}</div>
+      </div>
+    </div>`;
+}
+
+function selectGroupSize(n){
+  APP.groupSize = n;
+  APP.four = generateFour(n);
+  APP.screen = 'picker';
+  render();
+}
+
+function reshuffleFour(){
+  APP.four = generateFour(APP.groupSize);
+  render();
+}
+
+function renderPicker(){
+  const cards = APP.four.map((w,i)=>{
+    const color = TIER_COLOR[i];
+    let cardList = w.exercises;
+    if(w.format==='wrt'){
+      const trigger = w.exercises.find(e=>e.isTrigger);
+      const core = w.exercises.find(e=>e.isCoreRole);
+      const work = w.exercises.filter(e=>!e.isTrigger && !e.isCoreRole).slice(0,4);
+      cardList = [...work, ...(core?[core]:[]), ...(trigger?[trigger]:[])];
+    } else {
+      cardList = w.exercises.slice(0,6);
+    }
+    const exLines = cardList.map(e=>`
+      <div class="ex-line"><span class="ex-name">${e.name}${e.isTrigger?' (trigger)':''}${e.isCoreRole?' (core)':''}</span><span class="ex-amount">${e.amountLabel}</span></div>
+    `).join('');
+    const footer = w.grouping && w.grouping.short ? w.grouping.short + (w.format==='wrt' ? ` &middot; Trigger: ${w.trigger}` : '') : '';
+    return `
+      <div class="wod-card" style="--tier-color:${color}" onclick="openWorkout(${i})">
+        <div class="wod-card-band"></div>
+        <div class="wod-card-head">
+          <div class="wod-card-tier">${TIER_LABELS[i]}</div>
+          <div class="wod-card-duration">${w.duration} min</div>
+          <div class="wod-card-format">${FORMATS[w.format].name}</div>
+        </div>
+        <div class="wod-card-body">
+          <div class="struct">${w.structure}</div>
+          ${exLines}
+        </div>
+        ${footer?`<div class="wod-card-foot">${footer}</div>`:''}
+      </div>`;
+  }).join('');
+
+  $main.innerHTML = `
+    <div class="screen">
+      <div class="picker-header">
+        <div>
+          <h2>${APP.groupSize} ${APP.groupSize===1?'person':'people'} &mdash; pick a session</h2>
+          <div class="sub">Easiest on the left, hardest on the right.</div>
+        </div>
+        <div class="picker-controls">
+          <button class="btn btn-ghost btn-back" onclick="goHome()">&larr; Back</button>
+        </div>
+      </div>
+      <div class="card-row">${cards}</div>
+      <div class="spin-again-wrap">
+        <button class="btn-spin" onclick="reshuffleFour()">Spin again!</button>
+      </div>
+    </div>`;
+}
+
+function openWorkout(i){
+  // NOTE: tierIdx is left untouched here — it's the generation preset that
+  // built this workout's actual reps/rounds/timer math, not the difficulty
+  // rank. displayTier (set during generateFour) already carries the rank
+  // for label/colour purposes; overwriting tierIdx would desync the timer
+  // and structure text from a workout's own numbers.
+  APP.selected = {...APP.four[i], fromFavourites:false};
+  recordHistory(APP.selected);
+  APP.screen='full';
+  render();
+}
+
+function isFavourited(workout){
+  return STATE.favouriteWorkouts.some(f=>sameWorkout(f, workout));
+}
+function sameWorkout(a,b){
+  if(a.format!==b.format || a.tierIdx!==b.tierIdx || a.groupSize!==b.groupSize) return false;
+  const aIds = a.exercises.map(e=>e.id).sort().join(',');
+  const bIds = b.exercises.map(e=>e.id).sort().join(',');
+  return aIds===bIds;
+}
+function toggleFavouriteWorkout(){
+  const w = APP.selected;
+  const idx = STATE.favouriteWorkouts.findIndex(f=>sameWorkout(f,w));
+  if(idx>=0) STATE.favouriteWorkouts.splice(idx,1);
+  else STATE.favouriteWorkouts.push(JSON.parse(JSON.stringify(w)));
+  saveState();
+  render();
+}
+
+function renderFull(){
+  const w = APP.selected;
+  const i = (w.displayTier!==undefined) ? w.displayTier : w.tierIdx; // rank for label/colour only — buildTimerProgram below uses w.tierIdx internally, unaffected
+  const color = TIER_COLOR[i];
+  const fav = isFavourited(w);
+  const rows = w.exercises.map(e=>`
+    <div class="row${e.isTrigger?' trigger-row':''}${e.isCoreRole?' trigger-row':''}">
+      <div>
+        <div class="exname">${e.name}${e.isTrigger?' <span class="trigger-tag">TRIGGER</span>':''}${e.isCoreRole?' <span class="trigger-tag core-tag">CORE ROLE</span>':''}</div>
+        <div class="excue">${e.cue ? e.cue : e.pattern}</div>
+      </div>
+      <div class="examount">${e.amountLabel}</div>
+    </div>`).join('');
+
+  const notice = (w.grouping && w.grouping.detail)
+    ? `<div class="full-notice"><strong>${FORMATS[w.format].name}.</strong> ${w.grouping.detail}</div>`
+    : '';
+
+  $main.innerHTML = `
+    <div class="screen">
+      <div class="full-workout">
+        <div class="full-head">
+          <div class="full-head-left" style="--tier-color:${color}">
+            <div class="tier-tag">${TIER_LABELS[i]} &middot; ${w.duration} min</div>
+            <h1>${FORMATS[w.format].name}</h1>
+            <div class="meta">${w.structure} &middot; ${w.groupSize} ${w.groupSize===1?'person':'people'}</div>
+          </div>
+          <div class="full-actions">
+            <button class="btn" onclick="toggleFavouriteWorkout()">${fav?'\u2605 Favourited':'\u2606 Favourite this'}</button>
+            ${w.fromFavourites ? '' : '<button class="btn btn-ghost btn-back" onclick="backToPicker()">&larr; Back</button>'}
+            <button class="btn btn-ghost" onclick="goHome()">Home</button>
+          </div>
+        </div>
+        <div class="full-body">
+          <div class="full-left">
+            ${notice}
+            <div class="full-exlist">${rows}</div>
+          </div>
+          <div class="timer-panel" style="--tier-color:${color}">
+            <div class="timer-phase" id="timer-phase"></div>
+            <div class="timer-display" id="timer-display">00:00</div>
+            <div class="timer-meta" id="timer-meta"></div>
+            <div class="timer-total" id="timer-total"></div>
+            <div class="timer-controls">
+              <button class="timer-btn start" id="timer-start-btn" onclick="timerStart()">Start</button>
+              <button class="timer-btn pause" id="timer-pause-btn" onclick="timerPause()">Pause</button>
+              <button class="timer-btn" onclick="timerReset()">Reset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  initTimer(w);
+}
+
+function backToPicker(){ clearTimerInterval(); APP.screen='picker'; render(); }
+
+/* ---------- Settings ---------- */
+function renderSettings(){
+  const equipRows = EQUIPMENT.map(eq=>`
+    <label class="equip-item">
+      <input type="checkbox" ${equipmentAvailable(eq.id)?'checked':''} onchange="toggleEquip('${eq.id}')">
+      ${eq.name}
+    </label>`).join('');
+
+  const exRows = allExercises().sort((a,b)=>a.pattern.localeCompare(b.pattern)||a.name.localeCompare(b.name)).map(ex=>`
+    <tr>
+      <td>${ex.name}</td>
+      <td><span class="tag-pill">${ex.pattern}</span></td>
+      <td>${ex.equip.map(e=>`<span class="tag-pill">${e}</span>`).join(' ')}</td>
+      <td>${ex.trigger?'<span class="tag-pill">trigger</span>':''}</td>
+      <td><button class="fav-star ${STATE.favouriteExerciseIds.includes(ex.id)?'active':''}" onclick="toggleFavExercise('${ex.id}')">&#9733;</button></td>
+      <td><button class="del-btn" onclick="removeExercise('${ex.id}')">Remove</button></td>
+    </tr>`).join('');
+
+  const patternOptions = PATTERNS.map(p=>`<option value="${p}">${p}</option>`).join('');
+  const equipOptions = EQUIPMENT.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+
+  $main.innerHTML = `
+    <div class="screen">
+      <div class="screen-narrow" style="max-width:1000px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+          <h1 class="page-title" style="font-size:28px;text-align:left;margin:0;">Settings</h1>
+          <button class="btn btn-ghost" onclick="goHome()">Home</button>
+        </div>
+
+        <div class="panel-section">
+          <h3>Equipment on hand</h3>
+          <div class="equip-grid">${equipRows}</div>
+        </div>
+
+        <div class="panel-section">
+          <h3>Exercise database</h3>
+          <table class="ex-table">
+            <thead><tr><th>Exercise</th><th>Pattern</th><th>Equipment</th><th>Tag</th><th>Fav</th><th></th></tr></thead>
+            <tbody>${exRows}</tbody>
+          </table>
+          <div class="add-ex-form">
+            <input id="new-ex-name" placeholder="New exercise name">
+            <select id="new-ex-pattern">${patternOptions}</select>
+            <select id="new-ex-equip" multiple size="4">${equipOptions}</select>
+            <select id="new-ex-unit">
+              <option value="reps">reps</option>
+              <option value="cal">calories</option>
+              <option value="time">time (s)</option>
+            </select>
+            <input id="new-ex-base" type="number" placeholder="base amount" value="10" style="width:110px">
+            <button class="btn btn-primary" onclick="addExercise()">Add exercise</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+function toggleEquip(id){
+  if(STATE.equipmentOff.includes(id)) STATE.equipmentOff = STATE.equipmentOff.filter(x=>x!==id);
+  else STATE.equipmentOff.push(id);
+  saveState();
+}
+function toggleFavExercise(id){
+  if(STATE.favouriteExerciseIds.includes(id)) STATE.favouriteExerciseIds = STATE.favouriteExerciseIds.filter(x=>x!==id);
+  else STATE.favouriteExerciseIds.push(id);
+  saveState();
+  render();
+}
+function removeExercise(id){
+  STATE.removedExerciseIds.push(id);
+  saveState();
+  render();
+}
+function addExercise(){
+  const name = document.getElementById('new-ex-name').value.trim();
+  const pattern = document.getElementById('new-ex-pattern').value;
+  const unit = document.getElementById('new-ex-unit').value;
+  const base = parseFloat(document.getElementById('new-ex-base').value)||10;
+  const equipSel = document.getElementById('new-ex-equip');
+  const equip = Array.from(equipSel.selectedOptions).map(o=>o.value);
+  if(!name || equip.length===0){ alert('Give it a name and at least one equipment tag.'); return; }
+  const id = 'custom_'+Date.now();
+  STATE.customExercises.push({id,name,pattern,equip,unit,base});
+  saveState();
+  render();
+}
+
+/* ---------- Favourites ---------- */
+function renderFavourites(){
+  const sizes = ['all', ...new Set(STATE.favouriteWorkouts.map(f=>f.groupSize))].sort((a,b)=>a==='all'?-1:a-b);
+  const filterVal = APP._favFilter || 'all';
+  const opts = sizes.map(s=>`<option value="${s}" ${s==filterVal?'selected':''}>${s==='all'?'All group sizes':s+' people'}</option>`).join('');
+
+  const list = STATE.favouriteWorkouts.filter(f=>filterVal==='all' || f.groupSize==filterVal);
+  const cards = list.map((w,idx)=>{
+    const missing = w.exercises.some(e=>{
+      const full = allExercises().find(x=>x.id===e.id);
+      return !full || !exerciseUsable(full);
+    });
+    return `<div class="fav-card ${missing?'disabled':''}" onclick="${missing?'':`loadFavourite(${STATE.favouriteWorkouts.indexOf(w)})`}">
+      <h4>${FORMATS[w.format].name} &mdash; ${w.duration} min</h4>
+      <div class="fav-meta">${w.groupSize} people &middot; ${TIER_LABELS[(w.displayTier!==undefined)?w.displayTier:w.tierIdx]}</div>
+      ${missing?'<div class="fav-missing">Needs equipment not currently ticked</div>':''}
+    </div>`;
+  }).join('');
+
+  $main.innerHTML = `
+    <div class="screen">
+      <div class="screen-narrow" style="max-width:1000px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <h1 class="page-title" style="font-size:28px;text-align:left;margin:0;">Favourite workouts</h1>
+          <button class="btn btn-ghost" onclick="goHome()">Home</button>
+        </div>
+        <div class="fav-filter">
+          Filter by group size:
+          <select onchange="APP._favFilter=this.value; render();">${opts}</select>
+        </div>
+        ${list.length? `<div class="fav-grid">${cards}</div>` : `<div class="empty-state">No favourites saved yet &mdash; star a workout from its full-screen view to keep it here.</div>`}
+      </div>
+    </div>`;
+}
+function loadFavourite(idx){
+  const w = STATE.favouriteWorkouts[idx];
+  APP.selected = {...JSON.parse(JSON.stringify(w)), fromFavourites:true};
+  APP.screen='full';
+  render();
+}
+
+/* ---------- init ---------- */
+render();
+</script>
+</body>
+</html>
