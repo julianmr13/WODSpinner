@@ -449,8 +449,24 @@
   .sp-result-name{font-size:13px;font-weight:600;}
   .sp-result-owner{font-size:11px;color:var(--text-faint);}
   .sp-now-playing{display:flex;flex-direction:column;gap:12px;}
+  .sp-playlist-name{font-size:12px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;}
+  .sp-track-row{display:flex;align-items:center;gap:10px;}
+  .sp-track-art{width:48px;height:48px;object-fit:cover;flex-shrink:0;}
   .sp-track-name{font-size:14px;font-weight:600;}
-  .sp-controls{display:flex;gap:8px;}
+  .sp-track-artist{font-size:12px;color:var(--text-dim);}
+  .sp-transport{display:flex;align-items:center;justify-content:center;gap:6px;padding:4px 0;}
+  .sp-transport-btn{
+    background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+    font-size:16px;width:42px;height:42px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  }
+  .sp-transport-btn:hover{border-color:var(--yellow);}
+  .sp-transport-btn.active{border-color:var(--green);color:var(--green);background:#123822;}
+  .sp-transport-btn.sp-transport-main{
+    width:52px;height:52px;font-size:20px;
+    background:var(--yellow);color:#121417;border-color:var(--yellow);
+  }
+  .sp-transport-btn.sp-transport-main:hover{background:#ffd23f;}
 
   /* ---------- Settings & Favourites ---------- */
   .panel-section{
@@ -1234,6 +1250,19 @@ function beep(freq, durMs, vol, waveform){
 function playWarnBeep(){ beep(740,90,0.14,'sine'); }              // soft, short "bip"
 function playIntervalEndBeep(){ beep(950,600,0.55,'square'); }    // sharp, prominent "beeeep"
 
+// duck Spotify playback under the 3-2-1 warning beeps + transition beep so
+// they're actually audible over music, then restore normal volume shortly after
+function spotifyDuck(){
+  if(!SPOTIFY.player || SPOTIFY.ducked) return;
+  SPOTIFY.ducked = true;
+  try{ SPOTIFY.player.setVolume(0.12); }catch(e){}
+}
+function spotifyUnduck(){
+  if(!SPOTIFY.player) return;
+  SPOTIFY.ducked = false;
+  try{ SPOTIFY.player.setVolume(SPOTIFY.volume!=null?SPOTIFY.volume:0.7); }catch(e){}
+}
+
 function initTimer(workout){
   clearTimerInterval();
   const program = buildTimerProgram(workout);
@@ -1289,10 +1318,13 @@ function timerTick(){
     if(remaining<=3 && remaining>0 && !TIMER.warned.has(remaining)){
       TIMER.warned.add(remaining);
       playWarnBeep();
+      spotifyDuck();
     }
   }
   if(remainingMs<=0){
     playIntervalEndBeep();
+    spotifyDuck(); // covers phases shorter than 3s where the warn beep never fired
+    setTimeout(spotifyUnduck, 900);
     const nextIdx = TIMER.phaseIndex+1;
     if(nextIdx >= TIMER.program.phases.length){
       // workout complete
@@ -1402,7 +1434,12 @@ let SPOTIFY = {
   searchResults: [],
   searching: false,
   currentPlaylist: null,
+  currentTrack: null,
   isPlaying: false,
+  volume: 0.7,
+  ducked: false,
+  shuffleOn: false,
+  repeatMode: 'off', // 'off' | 'context' | 'track'
 };
 
 function spotifyLoggedIn(){
@@ -1577,7 +1614,7 @@ async function spotifyInitPlayer(){
   SPOTIFY.player = new Spotify.Player({
     name: 'WOD Spinner',
     getOAuthToken: cb => cb(SPOTIFY.auth.access_token),
-    volume: 0.7,
+    volume: SPOTIFY.volume,
   });
   SPOTIFY.player.addListener('ready', ({device_id})=>{
     SPOTIFY.deviceId = device_id; SPOTIFY.deviceReady = true; SPOTIFY.initializing = false;
@@ -1605,12 +1642,57 @@ async function spotifyInitPlayer(){
   SPOTIFY.player.addListener('player_state_changed', (state)=>{
     if(!state) return;
     SPOTIFY.isPlaying = !state.paused;
+    SPOTIFY.shuffleOn = !!state.shuffle;
+    SPOTIFY.repeatMode = ['off','context','track'][state.repeat_mode] || 'off';
+    const track = state.track_window && state.track_window.current_track;
+    if(track){
+      SPOTIFY.currentTrack = {
+        name: track.name,
+        artists: (track.artists||[]).map(a=>a.name).join(', '),
+        image: (track.album && track.album.images && track.album.images[0]) ? track.album.images[0].url : null,
+      };
+    }
     renderSpotifyPanel();
   });
   await SPOTIFY.player.connect();
 }
 
-// ---- search & playback ----
+// ---- transport controls ----
+async function spotifyNext(){
+  if(!SPOTIFY.player) return;
+  try{ await SPOTIFY.player.nextTrack(); }catch(e){}
+}
+async function spotifyPrev(){
+  if(!SPOTIFY.player) return;
+  try{ await SPOTIFY.player.previousTrack(); }catch(e){}
+}
+// shuffle/repeat aren't exposed on the SDK player object itself — they go
+// through the regular Web API player endpoints instead
+async function spotifyToggleShuffle(){
+  const ok = await spotifyEnsureToken();
+  if(!ok || !SPOTIFY.deviceId) return;
+  const next = !SPOTIFY.shuffleOn;
+  try{
+    await fetch(`https://api.spotify.com/v1/me/player/shuffle?state=${next}&device_id=${SPOTIFY.deviceId}`, {
+      method:'PUT', headers:{'Authorization':'Bearer '+SPOTIFY.auth.access_token}
+    });
+    SPOTIFY.shuffleOn = next;
+  }catch(e){}
+  renderSpotifyPanel();
+}
+async function spotifyCycleRepeat(){
+  const ok = await spotifyEnsureToken();
+  if(!ok || !SPOTIFY.deviceId) return;
+  const order = ['off','context','track'];
+  const next = order[(order.indexOf(SPOTIFY.repeatMode)+1)%3];
+  try{
+    await fetch(`https://api.spotify.com/v1/me/player/repeat?state=${next}&device_id=${SPOTIFY.deviceId}`, {
+      method:'PUT', headers:{'Authorization':'Bearer '+SPOTIFY.auth.access_token}
+    });
+    SPOTIFY.repeatMode = next;
+  }catch(e){}
+  renderSpotifyPanel();
+}
 async function spotifySearchPlaylists(query){
   if(!query || !query.trim()) return;
   SPOTIFY.searching = true;
@@ -1692,14 +1774,27 @@ function renderSpotifyPanel(){
   }
 
   if(SPOTIFY.currentPlaylist){
+    const t = SPOTIFY.currentTrack;
     el.innerHTML = `
       <div class="sp-head">Music</div>
       <div class="sp-now-playing">
-        <div class="sp-track-name">${SPOTIFY.currentPlaylist.name}</div>
-        <div class="sp-controls">
-          <button class="btn btn-spotify" onclick="spotifyTogglePlay()">${SPOTIFY.isPlaying?'Pause':'Play'}</button>
-          <button class="btn btn-ghost" onclick="spotifyChangePlaylist()">Change playlist</button>
+        <div class="sp-playlist-name">${SPOTIFY.currentPlaylist.name}</div>
+        ${t ? `
+          <div class="sp-track-row">
+            ${t.image ? `<img class="sp-track-art" src="${t.image}">` : '<div class="sp-track-art sp-thumb-empty"></div>'}
+            <div>
+              <div class="sp-track-name">${t.name}</div>
+              <div class="sp-track-artist">${t.artists}</div>
+            </div>
+          </div>` : ''}
+        <div class="sp-transport">
+          <button class="sp-transport-btn ${SPOTIFY.shuffleOn?'active':''}" onclick="spotifyToggleShuffle()" title="Shuffle">\u{1F500}</button>
+          <button class="sp-transport-btn" onclick="spotifyPrev()" title="Previous">\u23EE</button>
+          <button class="sp-transport-btn sp-transport-main" onclick="spotifyTogglePlay()" title="Play/Pause">${SPOTIFY.isPlaying?'\u23F8':'\u25B6'}</button>
+          <button class="sp-transport-btn" onclick="spotifyNext()" title="Next">\u23ED</button>
+          <button class="sp-transport-btn ${SPOTIFY.repeatMode!=='off'?'active':''}" onclick="spotifyCycleRepeat()" title="Repeat">${SPOTIFY.repeatMode==='track'?'\u{1F501}\u00B9':'\u{1F501}'}</button>
         </div>
+        <button class="btn btn-ghost" onclick="spotifyChangePlaylist()">Change playlist</button>
       </div>`;
     return;
   }
