@@ -727,9 +727,25 @@ function exerciseIsRotationOnly(ex){ return ex.equip.some(e=>ROTATION_ONLY_EQUIP
    GENERATION LOGIC
    ========================================================= */
 
+let SERVER_RECENT_IDS = new Set();
+
+async function refreshServerRecentHistory(){
+  if(!ACCOUNT.loggedIn){ SERVER_RECENT_IDS = new Set(); return; }
+  try{
+    const resp = await fetch('/api/history/recent');
+    const data = await resp.json();
+    SERVER_RECENT_IDS = new Set(data.recentExerciseIds || []);
+  }catch(e){
+    SERVER_RECENT_IDS = new Set();
+  }
+}
+
 function recentlyUsedIds(days){
   const cutoff = Date.now() - days*24*60*60*1000;
-  const ids = new Set();
+  // merge server-side history (personal, cross-device, already 7-day windowed
+  // by the backend) with local STATE.history as a same-session fallback for
+  // logged-out use or before the server fetch has completed
+  const ids = new Set(SERVER_RECENT_IDS);
   STATE.history.filter(h=>h.ts>=cutoff).forEach(h=>h.exerciseIds.forEach(id=>ids.add(id)));
   return ids;
 }
@@ -1298,16 +1314,41 @@ function initTimer(workout){
     endTs:null,
     warned:new Set(),
     tickHandle:null,
+    historyLogged:false, // only log to history once per session, on the FIRST Start press — not on every resume after Pause
   };
   renderTimerPanel();
 }
 
 function timerTotalPhases(){ return TIMER ? TIMER.program.phases.length : 0; }
 
+// logged on Start (not just opening a card) — and applies the same whether
+// the workout was freshly generated or loaded from Favourites, since Start
+// is the one moment that actually means "we did this," not just "we looked at it"
+async function logWorkoutHistory(workout){
+  if(!ACCOUNT.loggedIn || !workout) return;
+  const displayTier = (workout.displayTier!==undefined) ? workout.displayTier : workout.tierIdx;
+  try{
+    await fetch('/api/history', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        groupSize: workout.groupSize,
+        format: workout.format,
+        tierLabel: TIER_LABELS[displayTier] || null,
+        workout: workout,
+      }),
+    });
+  }catch(e){ /* history logging is best-effort — never block the workout on it */ }
+}
+
 function timerStart(){
   if(!TIMER) return;
   getAudioCtx(); // unlock audio on user gesture
   if(TIMER.running) return;
+  if(!TIMER.historyLogged){
+    TIMER.historyLogged = true;
+    logWorkoutHistory(APP.selected);
+  }
   TIMER.running = true;
   TIMER.endTs = Date.now() + TIMER.remaining*1000;
   TIMER.tickHandle = setInterval(timerTick, 200);
@@ -2213,6 +2254,7 @@ async function checkLoginStatus(){
   }
   ACCOUNT.loading = false;
   renderAccountWidget();
+  refreshServerRecentHistory(); // don't block the UI on this — repeat-avoidance just uses whatever's cached when generation runs
 }
 
 function signInWithGoogle(){
@@ -2224,6 +2266,7 @@ async function doLogout(){
   ACCOUNT.loggedIn = false;
   ACCOUNT.user = null;
   ACCOUNT.menuOpen = false;
+  SERVER_RECENT_IDS = new Set();
   renderAccountWidget();
 }
 
