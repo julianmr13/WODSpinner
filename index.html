@@ -1896,6 +1896,7 @@ let APP = {screen:'landing', groupSize:null, four:[], selected:null};
 function goHome(){ clearTimerInterval(); APP.screen='landing'; render(); }
 function showFavourites(){ clearTimerInterval(); APP.screen='favourites'; render(); }
 function showSettings(){ clearTimerInterval(); APP.screen='settings'; render(); }
+function showAdmin(){ clearTimerInterval(); APP.screen='admin'; ADMIN.loaded=false; render(); }
 
 function setNavActive(){
   // Favourites/Settings buttons now live inside the account menu (only
@@ -1915,6 +1916,7 @@ function render(){
   if(APP.screen==='full') return renderFull();
   if(APP.screen==='settings') return renderSettings();
   if(APP.screen==='favourites') return renderFavourites();
+  if(APP.screen==='admin') return renderAdmin();
 }
 
 function renderSpotifyBanner(){
@@ -2196,6 +2198,197 @@ function addExercise(){
   render();
 }
 
+/* ---------- Admin: master equipment/exercise management ---------- */
+let ADMIN = { loaded:false, loading:false, equipment:[], exercises:[], editingEquipmentId:null, editingExerciseId:null };
+
+function slugify(name){
+  return name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') + '_' + Math.random().toString(36).slice(2,6);
+}
+
+async function loadAdminData(){
+  ADMIN.loading = true;
+  try{
+    const [eqResp, exResp] = await Promise.all([
+      fetch('/api/admin/equipment'),
+      fetch('/api/admin/exercises'),
+    ]);
+    const eqData = await eqResp.json();
+    const exData = await exResp.json();
+    ADMIN.equipment = eqData.equipment || [];
+    ADMIN.exercises = exData.exercises || [];
+    ADMIN.loaded = true;
+  }catch(e){
+    ADMIN.equipment = [];
+    ADMIN.exercises = [];
+  }
+  ADMIN.loading = false;
+  renderAdmin();
+}
+
+function renderAdmin(){
+  if(!ACCOUNT.loggedIn || !ACCOUNT.user || !ACCOUNT.user.is_admin){
+    $main.innerHTML = `<div class="screen"><div class="screen-narrow"><p class="empty-state">Admin access only.</p></div></div>`;
+    return;
+  }
+  if(!ADMIN.loaded){
+    $main.innerHTML = `<div class="screen"><div class="screen-narrow"><p class="empty-state">Loading admin data&hellip;</p></div></div>`;
+    if(!ADMIN.loading) loadAdminData();
+    return;
+  }
+
+  const editingEq = ADMIN.equipment.find(e=>e.id===ADMIN.editingEquipmentId);
+  const eqRows = ADMIN.equipment.map(eq=>`
+    <tr>
+      <td>${eq.name}</td>
+      <td>${eq.rotation_only ? '<span class="tag-pill">rotation-only</span>' : ''}</td>
+      <td><code style="font-size:11px;color:var(--text-faint);">${eq.id}</code></td>
+      <td>
+        <button class="del-btn" onclick="adminEditEquipment('${eq.id}')">Edit</button>
+        <button class="del-btn" onclick="adminDeleteEquipment('${eq.id}')">Delete</button>
+      </td>
+    </tr>`).join('');
+
+  const editingEx = ADMIN.exercises.find(e=>e.id===ADMIN.editingExerciseId);
+  const exRows = [...ADMIN.exercises].sort((a,b)=>a.pattern.localeCompare(b.pattern)||a.name.localeCompare(b.name)).map(ex=>`
+    <tr>
+      <td>${ex.name}</td>
+      <td><span class="tag-pill">${ex.pattern}</span></td>
+      <td>${ex.equip.map(e=>`<span class="tag-pill">${e}</span>`).join(' ')}</td>
+      <td>${ex.unit}</td>
+      <td>${ex.is_trigger ? '<span class="tag-pill">trigger</span>' : ''}</td>
+      <td>
+        <button class="del-btn" onclick="adminEditExercise('${ex.id}')">Edit</button>
+        <button class="del-btn" onclick="adminDeleteExercise('${ex.id}')">Delete</button>
+      </td>
+    </tr>`).join('');
+
+  const patternOptions = PATTERNS.map(p=>`<option value="${p}" ${editingEx&&editingEx.pattern===p?'selected':''}>${p}</option>`).join('');
+  const equipOptions = ADMIN.equipment.map(e=>`<option value="${e.id}" ${editingEx&&editingEx.equip.includes(e.id)?'selected':''}>${e.name}</option>`).join('');
+
+  $main.innerHTML = `
+    <div class="screen">
+      <div class="screen-narrow" style="max-width:1000px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+          <h1 class="page-title" style="font-size:28px;text-align:left;margin:0;">Admin</h1>
+          <button class="btn btn-ghost" onclick="goHome()">Home</button>
+        </div>
+
+        <div class="panel-section">
+          <h3>Master equipment</h3>
+          <table class="ex-table">
+            <thead><tr><th>Name</th><th></th><th>ID</th><th></th></tr></thead>
+            <tbody>${eqRows}</tbody>
+          </table>
+          <div class="add-ex-form">
+            <input id="admin-eq-name" placeholder="Equipment name" value="${editingEq?editingEq.name:''}">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);">
+              <input type="checkbox" id="admin-eq-rotation" ${editingEq&&editingEq.rotation_only?'checked':''}> Single-capacity / rotation-only
+            </label>
+            <button class="btn btn-primary" onclick="adminSaveEquipment()">${ADMIN.editingEquipmentId?'Save changes':'Add equipment'}</button>
+            ${ADMIN.editingEquipmentId?'<button class="btn btn-ghost" onclick="adminCancelEditEquipment()">Cancel</button>':''}
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3>Master exercises</h3>
+          <table class="ex-table">
+            <thead><tr><th>Exercise</th><th>Pattern</th><th>Equipment</th><th>Unit</th><th>Tag</th><th></th></tr></thead>
+            <tbody>${exRows}</tbody>
+          </table>
+          <div class="add-ex-form">
+            <input id="admin-ex-name" placeholder="Exercise name" value="${editingEx?editingEx.name:''}">
+            <select id="admin-ex-pattern">${patternOptions}</select>
+            <select id="admin-ex-equip" multiple size="4">${equipOptions}</select>
+            <select id="admin-ex-unit">
+              <option value="reps" ${editingEx&&editingEx.unit==='reps'?'selected':''}>reps</option>
+              <option value="cal" ${editingEx&&editingEx.unit==='cal'?'selected':''}>calories</option>
+              <option value="time" ${editingEx&&editingEx.unit==='time'?'selected':''}>time (s)</option>
+              <option value="distance" ${editingEx&&editingEx.unit==='distance'?'selected':''}>distance</option>
+              <option value="note" ${editingEx&&editingEx.unit==='note'?'selected':''}>note (trigger-only)</option>
+            </select>
+            <input id="admin-ex-base" type="number" placeholder="base amount" value="${editingEx?editingEx.base:10}" style="width:110px">
+            <select id="admin-ex-intensity">
+              <option value="1" ${editingEx&&editingEx.intensity===1?'selected':''}>Intensity 1 (low)</option>
+              <option value="2" ${!editingEx||editingEx.intensity===2?'selected':''}>Intensity 2 (moderate)</option>
+              <option value="3" ${editingEx&&editingEx.intensity===3?'selected':''}>Intensity 3 (high)</option>
+            </select>
+            <input id="admin-ex-cue" placeholder="Technique cue" value="${editingEx?(editingEx.cue||''):''}" style="width:100%;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);">
+              <input type="checkbox" id="admin-ex-trigger" ${editingEx&&editingEx.is_trigger?'checked':''}> Trigger exercise (WRT only)
+            </label>
+            <button class="btn btn-primary" onclick="adminSaveExercise()">${ADMIN.editingExerciseId?'Save changes':'Add exercise'}</button>
+            ${ADMIN.editingExerciseId?'<button class="btn btn-ghost" onclick="adminCancelEditExercise()">Cancel</button>':''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function adminSaveEquipment(){
+  const name = document.getElementById('admin-eq-name').value.trim();
+  const rotationOnly = document.getElementById('admin-eq-rotation').checked;
+  if(!name){ alert('Give it a name.'); return; }
+  try{
+    if(ADMIN.editingEquipmentId){
+      await fetch('/api/admin/equipment/'+ADMIN.editingEquipmentId, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name, rotationOnly }),
+      });
+    } else {
+      const id = slugify(name);
+      await fetch('/api/admin/equipment', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id, name, rotationOnly }),
+      });
+    }
+  }catch(e){ alert('Something went wrong saving that.'); }
+  ADMIN.editingEquipmentId = null;
+  await loadAdminData();
+}
+function adminEditEquipment(id){ ADMIN.editingEquipmentId = id; renderAdmin(); }
+function adminCancelEditEquipment(){ ADMIN.editingEquipmentId = null; renderAdmin(); }
+async function adminDeleteEquipment(id){
+  if(!confirm('Delete this equipment from the master list? This may affect exercises that use it.')) return;
+  try{ await fetch('/api/admin/equipment/'+id, { method:'DELETE' }); }catch(e){}
+  await loadAdminData();
+}
+
+async function adminSaveExercise(){
+  const name = document.getElementById('admin-ex-name').value.trim();
+  const pattern = document.getElementById('admin-ex-pattern').value;
+  const unit = document.getElementById('admin-ex-unit').value;
+  const base = parseFloat(document.getElementById('admin-ex-base').value)||10;
+  const intensity = parseInt(document.getElementById('admin-ex-intensity').value,10)||2;
+  const cue = document.getElementById('admin-ex-cue').value.trim();
+  const isTrigger = document.getElementById('admin-ex-trigger').checked;
+  const equipSel = document.getElementById('admin-ex-equip');
+  const equip = Array.from(equipSel.selectedOptions).map(o=>o.value);
+  if(!name || equip.length===0){ alert('Give it a name and at least one equipment tag.'); return; }
+  try{
+    if(ADMIN.editingExerciseId){
+      await fetch('/api/admin/exercises/'+ADMIN.editingExerciseId, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name, pattern, equip, unit, base, intensity, cue, isTrigger }),
+      });
+    } else {
+      const id = slugify(name);
+      await fetch('/api/admin/exercises', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id, name, pattern, equip, unit, base, intensity, cue, isTrigger }),
+      });
+    }
+  }catch(e){ alert('Something went wrong saving that.'); }
+  ADMIN.editingExerciseId = null;
+  await loadAdminData();
+}
+function adminEditExercise(id){ ADMIN.editingExerciseId = id; renderAdmin(); }
+function adminCancelEditExercise(){ ADMIN.editingExerciseId = null; renderAdmin(); }
+async function adminDeleteExercise(id){
+  if(!confirm('Delete this exercise from the master list?')) return;
+  try{ await fetch('/api/admin/exercises/'+id, { method:'DELETE' }); }catch(e){}
+  await loadAdminData();
+}
+
 /* ---------- Favourites ---------- */
 function renderFavourites(){
   const sizes = ['all', ...new Set(STATE.favouriteWorkouts.map(f=>f.groupSize))].sort((a,b)=>a==='all'?-1:a-b);
@@ -2306,6 +2499,7 @@ function renderAccountWidget(){
           <div class="account-dropdown-divider"></div>
           <button class="account-dropdown-item" onclick="closeMenuAnd(showFavourites)">Favourites</button>
           <button class="account-dropdown-item" onclick="closeMenuAnd(showSettings)">Settings</button>
+          ${ACCOUNT.user.is_admin ? `<button class="account-dropdown-item" onclick="closeMenuAnd(showAdmin)">Admin</button>` : ''}
           <div class="account-dropdown-divider"></div>
           <button class="account-dropdown-logout" onclick="doLogout()">Log out</button>
         </div>` : ''}
