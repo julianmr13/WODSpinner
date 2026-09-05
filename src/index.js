@@ -64,6 +64,8 @@ export default {
         return handleDeleteFavourite(request, env, path.slice('/api/favourites/'.length));
       }
       if (path === '/api/popular') return handlePopular(request, env);
+      if (path === '/api/history' && request.method === 'POST') return handleAddHistory(request, env);
+      if (path === '/api/history/recent') return handleRecentHistory(request, env);
     } catch (err) {
       return json({ error: 'Server error', detail: String(err && err.message || err) }, 500);
     }
@@ -218,6 +220,48 @@ async function handleDeleteFavourite(request, env, id) {
   if (!user) return json({ error: 'Not logged in' }, 401);
   await env.DB.prepare('DELETE FROM favourites WHERE id = ? AND user_id = ?').bind(id, user.id).run();
   return json({ ok: true });
+}
+
+// ---- workout history (logged on Start, not just on opening a card) ----
+
+async function handleAddHistory(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ error: 'Not logged in' }, 401);
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'Invalid JSON body' }, 400); }
+  const { groupSize, format, tierLabel, workout } = body || {};
+  if (!groupSize || !format || !workout) return json({ error: 'Missing groupSize, format, or workout' }, 400);
+
+  const id = generateId(16);
+  const now = Date.now();
+  await env.DB.prepare(
+    'INSERT INTO workout_history (id, user_id, group_size, format, tier_label, workout_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, user.id, groupSize, format, tierLabel || null, JSON.stringify(workout), now).run();
+
+  const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
+  await env.DB.prepare(
+    'DELETE FROM workout_history WHERE user_id = ? AND created_at < ?'
+  ).bind(user.id, oneYearAgo).run();
+
+  return json({ id }, 201);
+}
+
+async function handleRecentHistory(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ recentExerciseIds: [] });
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const { results } = await env.DB.prepare(
+    'SELECT workout_json FROM workout_history WHERE user_id = ? AND created_at >= ?'
+  ).bind(user.id, sevenDaysAgo).all();
+
+  const ids = new Set();
+  for (const row of results) {
+    try {
+      const w = JSON.parse(row.workout_json);
+      (w.exercises || []).forEach(e => { if (e && e.id) ids.add(e.id); });
+    } catch (e) { /* skip malformed rows */ }
+  }
+  return json({ recentExerciseIds: Array.from(ids) });
 }
 
 // ---- popularity (aggregated across everyone, not just the current user) ----
