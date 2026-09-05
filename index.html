@@ -114,7 +114,14 @@
     padding:14px; min-width:200px; z-index:50;
   }
   .account-dropdown-name{font-weight:700;font-size:14px;}
-  .account-dropdown-email{font-size:12px;color:var(--text-faint);margin-bottom:12px;word-break:break-all;}
+  .account-dropdown-email{font-size:12px;color:var(--text-faint);margin-bottom:10px;word-break:break-all;}
+  .account-dropdown-divider{height:1px;background:var(--border-soft);margin:10px 0;}
+  .account-dropdown-item{
+    display:block; width:100%; text-align:left;
+    background:none; border:none; color:var(--text);
+    padding:9px 4px; font-size:13px; cursor:pointer; font-family:var(--font-body);
+  }
+  .account-dropdown-item:hover{color:var(--yellow);}
   .account-dropdown-logout{
     width:100%; background:var(--panel-2); border:1px solid var(--border); color:var(--text);
     padding:9px; font-size:13px; cursor:pointer; font-family:var(--font-body);
@@ -549,8 +556,6 @@
   </button>
   <div class="nav-actions">
     <div id="account-widget"></div>
-    <button class="nav-btn" id="nav-fav" onclick="showFavourites()">Favourites</button>
-    <button class="nav-btn" id="nav-settings" onclick="showSettings()">Settings</button>
   </div>
 </div>
 <div id="spotify-banner"></div>
@@ -1852,8 +1857,13 @@ function showFavourites(){ clearTimerInterval(); APP.screen='favourites'; render
 function showSettings(){ clearTimerInterval(); APP.screen='settings'; render(); }
 
 function setNavActive(){
-  document.getElementById('nav-fav').classList.toggle('active', APP.screen==='favourites');
-  document.getElementById('nav-settings').classList.toggle('active', APP.screen==='settings');
+  // Favourites/Settings buttons now live inside the account menu (only
+  // rendered while that dropdown is open), so guard against them not
+  // being in the DOM at all rather than assuming they always exist.
+  const favBtn = document.getElementById('nav-fav');
+  const setBtn = document.getElementById('nav-settings');
+  if(favBtn) favBtn.classList.toggle('active', APP.screen==='favourites');
+  if(setBtn) setBtn.classList.toggle('active', APP.screen==='settings');
 }
 
 function render(){
@@ -2223,12 +2233,20 @@ function toggleAccountMenu(e){
   renderAccountWidget();
 }
 
+function closeMenuAnd(fn){
+  ACCOUNT.menuOpen = false;
+  renderAccountWidget();
+  fn();
+}
+
 function renderAccountWidget(){
   const el = document.getElementById('account-widget');
   if(!el) return;
   if(ACCOUNT.loading){ el.innerHTML = ''; return; }
 
   if(!ACCOUNT.loggedIn){
+    // Favourites/Settings are user-specific once logged in, so there's
+    // nothing for a logged-out visitor to open — just the sign-in button.
     el.innerHTML = `<button class="nav-btn btn-google" onclick="signInWithGoogle()">Sign in</button>`;
     return;
   }
@@ -2242,6 +2260,10 @@ function renderAccountWidget(){
         <div class="account-dropdown" onclick="event.stopPropagation()">
           <div class="account-dropdown-name">${ACCOUNT.user.display_name || ''}</div>
           <div class="account-dropdown-email">${ACCOUNT.user.email || ''}</div>
+          <div class="account-dropdown-divider"></div>
+          <button class="account-dropdown-item" onclick="closeMenuAnd(showFavourites)">Favourites</button>
+          <button class="account-dropdown-item" onclick="closeMenuAnd(showSettings)">Settings</button>
+          <div class="account-dropdown-divider"></div>
           <button class="account-dropdown-logout" onclick="doLogout()">Log out</button>
         </div>` : ''}
     </div>`;
