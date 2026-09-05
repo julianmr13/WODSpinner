@@ -1,8 +1,10 @@
 {
   "name": "wodspinner",
   "compatibility_date": "2026-09-04",
+  "main": "src/index.js",
   "assets": {
     "directory": "./",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
   "d1_databases": [
