@@ -103,6 +103,24 @@
   .nav-btn:hover{border-color:var(--yellow-dim);color:var(--text);}
   .nav-btn.active{border-color:var(--yellow);color:var(--yellow);}
 
+  /* ---------- Account widget ---------- */
+  .account-menu-wrap{position:relative;}
+  .btn-google{background:#fff;color:#3c4043;border-color:#dadce0;font-weight:700;}
+  .btn-google:hover{background:#f1f3f4;}
+  .account-pill{background:var(--panel-2);}
+  .account-dropdown{
+    position:absolute; top:calc(100% + 8px); right:0;
+    background:var(--panel); border:1px solid var(--border);
+    padding:14px; min-width:200px; z-index:50;
+  }
+  .account-dropdown-name{font-weight:700;font-size:14px;}
+  .account-dropdown-email{font-size:12px;color:var(--text-faint);margin-bottom:12px;word-break:break-all;}
+  .account-dropdown-logout{
+    width:100%; background:var(--panel-2); border:1px solid var(--border); color:var(--text);
+    padding:9px; font-size:13px; cursor:pointer; font-family:var(--font-body);
+  }
+  .account-dropdown-logout:hover{border-color:var(--red);color:var(--red);}
+
   /* ---------- Main container ---------- */
   main{flex:1;display:flex;flex-direction:column;overflow:auto;}
   .screen{flex:1;display:flex;flex-direction:column;padding:40px 32px;}
@@ -530,11 +548,11 @@
     <span class="brand-name">WOD Spinner</span>
   </button>
   <div class="nav-actions">
+    <div id="account-widget"></div>
     <button class="nav-btn" id="nav-fav" onclick="showFavourites()">Favourites</button>
     <button class="nav-btn" id="nav-settings" onclick="showSettings()">Settings</button>
   </div>
 </div>
-
 <div id="spotify-banner"></div>
 <main id="main"></main>
 
@@ -1247,7 +1265,7 @@ function beep(freq, durMs, vol, waveform){
     osc.stop(now+dur);
   }catch(e){}
 }
-function playWarnBeep(){ beep(740,90,0.14,'sine'); }              // soft, short "bip"
+function playWarnBeep(){ beep(740,140,0.4,'sine'); }               // soft-toned but louder "bip"
 function playIntervalEndBeep(){ beep(950,600,0.55,'square'); }    // sharp, prominent "beeeep"
 
 // duck Spotify playback under the 3-2-1 warning beeps + transition beep so
@@ -1255,7 +1273,7 @@ function playIntervalEndBeep(){ beep(950,600,0.55,'square'); }    // sharp, prom
 function spotifyDuck(){
   if(!SPOTIFY.player || SPOTIFY.ducked) return;
   SPOTIFY.ducked = true;
-  try{ SPOTIFY.player.setVolume(0.12); }catch(e){}
+  try{ SPOTIFY.player.setVolume(0.06); }catch(e){}
 }
 function spotifyUnduck(){
   if(!SPOTIFY.player) return;
@@ -1315,15 +1333,21 @@ function timerTick(){
   const remaining = Math.max(0, Math.ceil(remainingMs/1000));
   if(remaining!==TIMER.remaining){
     TIMER.remaining = remaining;
+    // duck a second before the first bip actually plays, since Spotify's
+    // volume change isn't instantaneous — ducking at the same moment as the
+    // beep meant the first one or two still played over full-volume music
+    if(remaining===4 && !TIMER.warned.has('duck')){
+      TIMER.warned.add('duck');
+      spotifyDuck();
+    }
     if(remaining<=3 && remaining>0 && !TIMER.warned.has(remaining)){
       TIMER.warned.add(remaining);
       playWarnBeep();
-      spotifyDuck();
     }
   }
   if(remainingMs<=0){
     playIntervalEndBeep();
-    spotifyDuck(); // covers phases shorter than 3s where the warn beep never fired
+    spotifyDuck(); // covers phases shorter than 4s where the early duck never fired
     setTimeout(spotifyUnduck, 900);
     const nextIdx = TIMER.phaseIndex+1;
     if(nextIdx >= TIMER.program.phases.length){
@@ -2162,6 +2186,72 @@ function loadFavourite(idx){
   render();
 }
 
+/* =========================================================
+   ACCOUNT (Google login via our own backend)
+   ========================================================= */
+let ACCOUNT = { loading: true, loggedIn: false, user: null, menuOpen: false };
+
+async function checkLoginStatus(){
+  try{
+    const resp = await fetch('/api/me');
+    const data = await resp.json();
+    ACCOUNT.loggedIn = !!data.loggedIn;
+    ACCOUNT.user = data.user || null;
+  }catch(e){
+    ACCOUNT.loggedIn = false;
+    ACCOUNT.user = null;
+  }
+  ACCOUNT.loading = false;
+  renderAccountWidget();
+}
+
+function signInWithGoogle(){
+  window.location.href = '/auth/google/login';
+}
+
+async function doLogout(){
+  try{ await fetch('/auth/logout', { method:'POST' }); }catch(e){}
+  ACCOUNT.loggedIn = false;
+  ACCOUNT.user = null;
+  ACCOUNT.menuOpen = false;
+  renderAccountWidget();
+}
+
+function toggleAccountMenu(e){
+  if(e) e.stopPropagation();
+  ACCOUNT.menuOpen = !ACCOUNT.menuOpen;
+  renderAccountWidget();
+}
+
+function renderAccountWidget(){
+  const el = document.getElementById('account-widget');
+  if(!el) return;
+  if(ACCOUNT.loading){ el.innerHTML = ''; return; }
+
+  if(!ACCOUNT.loggedIn){
+    el.innerHTML = `<button class="nav-btn btn-google" onclick="signInWithGoogle()">Sign in</button>`;
+    return;
+  }
+
+  const name = (ACCOUNT.user && (ACCOUNT.user.display_name || ACCOUNT.user.email)) || 'Account';
+  const firstName = name.split(' ')[0];
+  el.innerHTML = `
+    <div class="account-menu-wrap">
+      <button class="nav-btn account-pill" onclick="toggleAccountMenu(event)">${firstName} &#9662;</button>
+      ${ACCOUNT.menuOpen ? `
+        <div class="account-dropdown" onclick="event.stopPropagation()">
+          <div class="account-dropdown-name">${ACCOUNT.user.display_name || ''}</div>
+          <div class="account-dropdown-email">${ACCOUNT.user.email || ''}</div>
+          <button class="account-dropdown-logout" onclick="doLogout()">Log out</button>
+        </div>` : ''}
+    </div>`;
+}
+
+// close the dropdown when tapping anywhere else on the page
+document.addEventListener('click', function(){
+  if(ACCOUNT.menuOpen){ ACCOUNT.menuOpen = false; renderAccountWidget(); }
+});
+
 /* ---------- init ---------- */
 // process any Spotify login redirect (?code=...) before the first render,
 // so a returning user lands back where they were, already connected
@@ -2169,6 +2259,7 @@ async function processSpotifyReturn(){
   await handleSpotifyRedirect();
   render();
 }
+checkLoginStatus();
 // mobile browsers can restore this page from cache when Spotify redirects
 // back (treating it like a "back" navigation rather than a fresh load), which
 // would skip the normal script run entirely and silently drop the ?code=/
