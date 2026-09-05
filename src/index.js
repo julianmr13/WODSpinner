@@ -66,6 +66,22 @@ export default {
       if (path === '/api/popular') return handlePopular(request, env);
       if (path === '/api/history' && request.method === 'POST') return handleAddHistory(request, env);
       if (path === '/api/history/recent') return handleRecentHistory(request, env);
+      if (path === '/api/admin/equipment' && request.method === 'GET') return handleAdminListEquipment(request, env);
+      if (path === '/api/admin/equipment' && request.method === 'POST') return handleAdminAddEquipment(request, env);
+      if (path.startsWith('/api/admin/equipment/') && request.method === 'PUT') {
+        return handleAdminUpdateEquipment(request, env, path.slice('/api/admin/equipment/'.length));
+      }
+      if (path.startsWith('/api/admin/equipment/') && request.method === 'DELETE') {
+        return handleAdminDeleteEquipment(request, env, path.slice('/api/admin/equipment/'.length));
+      }
+      if (path === '/api/admin/exercises' && request.method === 'GET') return handleAdminListExercises(request, env);
+      if (path === '/api/admin/exercises' && request.method === 'POST') return handleAdminAddExercise(request, env);
+      if (path.startsWith('/api/admin/exercises/') && request.method === 'PUT') {
+        return handleAdminUpdateExercise(request, env, path.slice('/api/admin/exercises/'.length));
+      }
+      if (path.startsWith('/api/admin/exercises/') && request.method === 'DELETE') {
+        return handleAdminDeleteExercise(request, env, path.slice('/api/admin/exercises/'.length));
+      }
     } catch (err) {
       return json({ error: 'Server error', detail: String(err && err.message || err) }, 500);
     }
@@ -74,7 +90,6 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
-
 // ---- Google OAuth (standard Authorization Code flow — safe to use the
 // client secret here since this all runs server-side, never in the browser) ----
 
@@ -181,7 +196,6 @@ async function handleMe(request, env) {
   if (!user) return json({ loggedIn: false });
   return json({ loggedIn: true, user });
 }
-
 // ---- favourites ----
 
 async function handleListFavourites(request, env) {
@@ -262,6 +276,98 @@ async function handleRecentHistory(request, env) {
     } catch (e) { /* skip malformed rows */ }
   }
   return json({ recentExerciseIds: Array.from(ids) });
+}
+
+async function requireAdmin(request, env){
+  const user = await getSessionUser(request, env);
+  if(!user || !user.is_admin) return null;
+  return user;
+}
+// ---- admin: master equipment management ----
+
+async function handleAdminListEquipment(request, env){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  const { results } = await env.DB.prepare(
+    'SELECT id, name, rotation_only, created_at FROM master_equipment ORDER BY name'
+  ).all();
+  return json({ equipment: results });
+}
+
+async function handleAdminAddEquipment(request, env){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { id, name, rotationOnly } = body || {};
+  if(!id || !name) return json({error:'Missing id or name'}, 400);
+  await env.DB.prepare(
+    'INSERT INTO master_equipment (id, name, rotation_only, created_at) VALUES (?, ?, ?, ?)'
+  ).bind(id, name, rotationOnly?1:0, Date.now()).run();
+  return json({ ok:true }, 201);
+}
+
+async function handleAdminUpdateEquipment(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { name, rotationOnly } = body || {};
+  await env.DB.prepare(
+    'UPDATE master_equipment SET name=?, rotation_only=? WHERE id=?'
+  ).bind(name, rotationOnly?1:0, id).run();
+  return json({ ok:true });
+}
+
+async function handleAdminDeleteEquipment(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  await env.DB.prepare('DELETE FROM master_equipment WHERE id=?').bind(id).run();
+  return json({ ok:true });
+}
+
+// ---- admin: master exercise management ----
+
+async function handleAdminListExercises(request, env){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  const { results } = await env.DB.prepare(
+    'SELECT id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, created_at FROM master_exercises ORDER BY name'
+  ).all();
+  const exercises = results.map(r => ({ ...r, equip: JSON.parse(r.equip_json) }));
+  return json({ exercises });
+}
+
+async function handleAdminAddExercise(request, env){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { id, name, pattern, equip, unit, base, intensity, cue, isTrigger } = body || {};
+  if(!id || !name || !pattern || !equip || !unit) return json({error:'Missing required fields'}, 400);
+  await env.DB.prepare(
+    'INSERT INTO master_exercises (id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, name, pattern, JSON.stringify(equip), unit, base||10, intensity||2, cue||'', isTrigger?1:0, Date.now()).run();
+  return json({ ok:true }, 201);
+}
+
+async function handleAdminUpdateExercise(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { name, pattern, equip, unit, base, intensity, cue, isTrigger } = body || {};
+  await env.DB.prepare(
+    'UPDATE master_exercises SET name=?, pattern=?, equip_json=?, unit=?, base=?, intensity=?, cue=?, is_trigger=? WHERE id=?'
+  ).bind(name, pattern, JSON.stringify(equip||[]), unit, base||10, intensity||2, cue||'', isTrigger?1:0, id).run();
+  return json({ ok:true });
+}
+
+async function handleAdminDeleteExercise(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  await env.DB.prepare('DELETE FROM master_exercises WHERE id=?').bind(id).run();
+  return json({ ok:true });
 }
 
 // ---- popularity (aggregated across everyone, not just the current user) ----
