@@ -2199,7 +2199,7 @@ function addExercise(){
 }
 
 /* ---------- Admin: master equipment/exercise management ---------- */
-let ADMIN = { loaded:false, loading:false, equipment:[], exercises:[], editingEquipmentId:null, editingExerciseId:null };
+let ADMIN = { loaded:false, loading:false, equipment:[], exercises:[], pendingEquipment:[], pendingExercises:[], editingEquipmentId:null, editingExerciseId:null };
 
 function slugify(name){
   return name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') + '_' + Math.random().toString(36).slice(2,6);
@@ -2208,21 +2208,46 @@ function slugify(name){
 async function loadAdminData(){
   ADMIN.loading = true;
   try{
-    const [eqResp, exResp] = await Promise.all([
+    const [eqResp, exResp, pendingEqResp, pendingExResp] = await Promise.all([
       fetch('/api/admin/equipment'),
       fetch('/api/admin/exercises'),
+      fetch('/api/admin/review/equipment'),
+      fetch('/api/admin/review/exercises'),
     ]);
     const eqData = await eqResp.json();
     const exData = await exResp.json();
+    const pendingEqData = await pendingEqResp.json();
+    const pendingExData = await pendingExResp.json();
     ADMIN.equipment = eqData.equipment || [];
     ADMIN.exercises = exData.exercises || [];
+    ADMIN.pendingEquipment = pendingEqData.pending || [];
+    ADMIN.pendingExercises = pendingExData.pending || [];
     ADMIN.loaded = true;
   }catch(e){
     ADMIN.equipment = [];
     ADMIN.exercises = [];
+    ADMIN.pendingEquipment = [];
+    ADMIN.pendingExercises = [];
   }
   ADMIN.loading = false;
   renderAdmin();
+}
+
+async function adminPromotePendingEquipment(id){
+  try{ await fetch('/api/admin/review/equipment/'+id+'/promote', { method:'POST' }); }catch(e){}
+  await loadAdminData();
+}
+async function adminDismissPendingEquipment(id){
+  try{ await fetch('/api/admin/review/equipment/'+id+'/dismiss', { method:'POST' }); }catch(e){}
+  await loadAdminData();
+}
+async function adminPromotePendingExercise(id){
+  try{ await fetch('/api/admin/review/exercises/'+id+'/promote', { method:'POST' }); }catch(e){}
+  await loadAdminData();
+}
+async function adminDismissPendingExercise(id){
+  try{ await fetch('/api/admin/review/exercises/'+id+'/dismiss', { method:'POST' }); }catch(e){}
+  await loadAdminData();
 }
 
 function renderAdmin(){
@@ -2265,12 +2290,53 @@ function renderAdmin(){
   const patternOptions = PATTERNS.map(p=>`<option value="${p}" ${editingEx&&editingEx.pattern===p?'selected':''}>${p}</option>`).join('');
   const equipOptions = ADMIN.equipment.map(e=>`<option value="${e.id}" ${editingEx&&editingEx.equip.includes(e.id)?'selected':''}>${e.name}</option>`).join('');
 
+  const pendingEqRows = ADMIN.pendingEquipment.map(p=>`
+    <tr>
+      <td>${p.name}</td>
+      <td>${p.rotation_only?'<span class="tag-pill">rotation-only</span>':''}</td>
+      <td style="font-size:12px;color:var(--text-faint);">${p.display_name||p.email}</td>
+      <td>
+        <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;" onclick="adminPromotePendingEquipment('${p.id}')">Promote</button>
+        <button class="del-btn" onclick="adminDismissPendingEquipment('${p.id}')">Dismiss</button>
+      </td>
+    </tr>`).join('');
+
+  const pendingExRows = ADMIN.pendingExercises.map(p=>`
+    <tr>
+      <td>${p.name}</td>
+      <td><span class="tag-pill">${p.pattern}</span></td>
+      <td>${p.equip.map(e=>`<span class="tag-pill">${e}</span>`).join(' ')}</td>
+      <td style="font-size:12px;color:var(--text-faint);">${p.display_name||p.email}</td>
+      <td>
+        <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;" onclick="adminPromotePendingExercise('${p.id}')">Promote</button>
+        <button class="del-btn" onclick="adminDismissPendingExercise('${p.id}')">Dismiss</button>
+      </td>
+    </tr>`).join('');
+
   $main.innerHTML = `
     <div class="screen">
       <div class="screen-narrow" style="max-width:1000px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
           <h1 class="page-title" style="font-size:28px;text-align:left;margin:0;">Admin</h1>
           <button class="btn btn-ghost" onclick="goHome()">Home</button>
+        </div>
+
+        <div class="panel-section">
+          <h3>Pending equipment submissions ${ADMIN.pendingEquipment.length?`(${ADMIN.pendingEquipment.length})`:''}</h3>
+          ${ADMIN.pendingEquipment.length ? `
+            <table class="ex-table">
+              <thead><tr><th>Name</th><th></th><th>Submitted by</th><th></th></tr></thead>
+              <tbody>${pendingEqRows}</tbody>
+            </table>` : '<p class="empty-state">Nothing pending.</p>'}
+        </div>
+
+        <div class="panel-section">
+          <h3>Pending exercise submissions ${ADMIN.pendingExercises.length?`(${ADMIN.pendingExercises.length})`:''}</h3>
+          ${ADMIN.pendingExercises.length ? `
+            <table class="ex-table">
+              <thead><tr><th>Name</th><th>Pattern</th><th>Equipment</th><th>Submitted by</th><th></th></tr></thead>
+              <tbody>${pendingExRows}</tbody>
+            </table>` : '<p class="empty-state">Nothing pending.</p>'}
         </div>
 
         <div class="panel-section">
