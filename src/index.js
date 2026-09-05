@@ -75,6 +75,20 @@ export default {
         return handleAdminDeleteEquipment(request, env, path.slice('/api/admin/equipment/'.length));
       }
       if (path === '/api/admin/exercises' && request.method === 'GET') return handleAdminListExercises(request, env);
+      if (path === '/api/admin/review/equipment' && request.method === 'GET') return handleAdminListPendingEquipment(request, env);
+      if (path.startsWith('/api/admin/review/equipment/') && path.endsWith('/promote') && request.method === 'POST') {
+        return handleAdminPromoteEquipment(request, env, path.slice('/api/admin/review/equipment/'.length, -'/promote'.length));
+      }
+      if (path.startsWith('/api/admin/review/equipment/') && path.endsWith('/dismiss') && request.method === 'POST') {
+        return handleAdminDismissEquipment(request, env, path.slice('/api/admin/review/equipment/'.length, -'/dismiss'.length));
+      }
+      if (path === '/api/admin/review/exercises' && request.method === 'GET') return handleAdminListPendingExercises(request, env);
+      if (path.startsWith('/api/admin/review/exercises/') && path.endsWith('/promote') && request.method === 'POST') {
+        return handleAdminPromoteExercise(request, env, path.slice('/api/admin/review/exercises/'.length, -'/promote'.length));
+      }
+      if (path.startsWith('/api/admin/review/exercises/') && path.endsWith('/dismiss') && request.method === 'POST') {
+        return handleAdminDismissExercise(request, env, path.slice('/api/admin/review/exercises/'.length, -'/dismiss'.length));
+      }
       if (path === '/api/admin/exercises' && request.method === 'POST') return handleAdminAddExercise(request, env);
       if (path.startsWith('/api/admin/exercises/') && request.method === 'PUT') {
         return handleAdminUpdateExercise(request, env, path.slice('/api/admin/exercises/'.length));
@@ -282,6 +296,82 @@ async function requireAdmin(request, env){
   const user = await getSessionUser(request, env);
   if(!user || !user.is_admin) return null;
   return user;
+}
+
+function slugifyServer(name){
+  const base = String(name).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  return base + '_' + Math.random().toString(36).slice(2,6);
+}
+// ---- admin: review queue for user-submitted custom equipment/exercises ----
+
+async function handleAdminListPendingEquipment(request, env){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  const { results } = await env.DB.prepare(
+    `SELECT user_equipment_custom.id, user_equipment_custom.name, user_equipment_custom.rotation_only,
+            user_equipment_custom.created_at, users.email, users.display_name
+     FROM user_equipment_custom
+     JOIN users ON users.id = user_equipment_custom.user_id
+     WHERE user_equipment_custom.promoted_master_id IS NULL AND user_equipment_custom.dismissed = 0
+     ORDER BY user_equipment_custom.created_at ASC`
+  ).all();
+  return json({ pending: results });
+}
+
+async function handleAdminPromoteEquipment(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  const row = await env.DB.prepare('SELECT * FROM user_equipment_custom WHERE id = ?').bind(id).first();
+  if(!row) return json({error:'Not found'}, 404);
+  const masterId = slugifyServer(row.name);
+  await env.DB.prepare(
+    'INSERT INTO master_equipment (id, name, rotation_only, created_at) VALUES (?, ?, ?, ?)'
+  ).bind(masterId, row.name, row.rotation_only, Date.now()).run();
+  await env.DB.prepare('UPDATE user_equipment_custom SET promoted_master_id = ? WHERE id = ?').bind(masterId, id).run();
+  return json({ ok:true, masterId });
+}
+
+async function handleAdminDismissEquipment(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  await env.DB.prepare('UPDATE user_equipment_custom SET dismissed = 1 WHERE id = ?').bind(id).run();
+  return json({ ok:true });
+}
+
+async function handleAdminListPendingExercises(request, env){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  const { results } = await env.DB.prepare(
+    `SELECT user_exercises.id, user_exercises.name, user_exercises.pattern, user_exercises.equip_json,
+            user_exercises.unit, user_exercises.base, user_exercises.intensity, user_exercises.cue,
+            user_exercises.created_at, users.email, users.display_name
+     FROM user_exercises
+     JOIN users ON users.id = user_exercises.user_id
+     WHERE user_exercises.promoted_master_id IS NULL AND user_exercises.dismissed = 0
+     ORDER BY user_exercises.created_at ASC`
+  ).all();
+  const pending = results.map(r => ({ ...r, equip: JSON.parse(r.equip_json) }));
+  return json({ pending });
+}
+
+async function handleAdminPromoteExercise(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  const row = await env.DB.prepare('SELECT * FROM user_exercises WHERE id = ?').bind(id).first();
+  if(!row) return json({error:'Not found'}, 404);
+  const masterId = slugifyServer(row.name);
+  await env.DB.prepare(
+    'INSERT INTO master_exercises (id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
+  ).bind(masterId, row.name, row.pattern, row.equip_json, row.unit, row.base, row.intensity, row.cue||'', Date.now()).run();
+  await env.DB.prepare('UPDATE user_exercises SET promoted_master_id = ? WHERE id = ?').bind(masterId, id).run();
+  return json({ ok:true, masterId });
+}
+
+async function handleAdminDismissExercise(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  await env.DB.prepare('UPDATE user_exercises SET dismissed = 1 WHERE id = ?').bind(id).run();
+  return json({ ok:true });
 }
 // ---- admin: master equipment management ----
 
