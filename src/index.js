@@ -74,7 +74,11 @@ export default {
       if (path.startsWith('/api/admin/equipment/') && request.method === 'DELETE') {
         return handleAdminDeleteEquipment(request, env, path.slice('/api/admin/equipment/'.length));
       }
-      if (path === '/api/admin/exercises' && request.method === 'GET') return handleAdminListExercises(request, env);
+            if (path === '/api/admin/exercises' && request.method === 'GET') return handleAdminListExercises(request, env);
+      if (path === '/api/admin/users' && request.method === 'GET') return handleAdminListUsers(request, env);
+      if (path.startsWith('/api/admin/users/') && path.endsWith('/tier') && request.method === 'PUT') {
+        return handleAdminSetUserTier(request, env, path.slice('/api/admin/users/'.length, -'/tier'.length));
+      }
       if (path === '/api/admin/review/equipment' && request.method === 'GET') return handleAdminListPendingEquipment(request, env);
       if (path.startsWith('/api/admin/review/equipment/') && path.endsWith('/promote') && request.method === 'POST') {
         return handleAdminPromoteEquipment(request, env, path.slice('/api/admin/review/equipment/'.length, -'/promote'.length));
@@ -301,6 +305,30 @@ async function requireAdmin(request, env){
 function slugifyServer(name){
   const base = String(name).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
   return base + '_' + Math.random().toString(36).slice(2,6);
+}
+
+// ---- admin: user tier management (TFO/Premium) ----
+
+async function handleAdminListUsers(request, env){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  const { results } = await env.DB.prepare(
+    'SELECT id, email, display_name, nickname, tier, is_admin, created_at FROM users ORDER BY created_at DESC'
+  ).all();
+  return json({ users: results });
+}
+
+async function handleAdminSetUserTier(request, env, id){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { tier } = body || {};
+  if(!['free','tfo','premium'].includes(tier)) return json({error:'Invalid tier'}, 400);
+  await env.DB.prepare(
+    'UPDATE users SET tier = ?, tier_granted_by = ?, tier_expires_at = NULL WHERE id = ?'
+  ).bind(tier, admin.id, id).run();
+  return json({ ok:true });
 }
 // ---- admin: review queue for user-submitted custom equipment/exercises ----
 
