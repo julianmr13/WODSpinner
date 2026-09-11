@@ -715,13 +715,45 @@ function saveState(){
   try{ localStorage.setItem(LS_KEY, JSON.stringify(STATE)); }catch(e){}
 }
 
-function allExercises(){
-  const removed = new Set(STATE.removedExerciseIds);
-  return [...DEFAULT_EXERCISES, ...STATE.customExercises].filter(e=>!removed.has(e.id));
+/* =========================================================
+   GYM DATA (equipment + exercises — now from the database,
+   not the old hardcoded EQUIPMENT/DEFAULT_EXERCISES arrays)
+   ========================================================= */
+let GYM_DATA = { loggedIn:false, equipment:[], exercises:[], favouriteExerciseIds:[] };
+let GYM_DATA_READY = null;
+
+function loadGymData(){
+  GYM_DATA_READY = fetch('/api/gym-data')
+    .then(r=>r.json())
+    .then(data=>{
+      GYM_DATA.loggedIn = !!data.loggedIn;
+      GYM_DATA.equipment = data.equipment || [];
+      GYM_DATA.exercises = data.exercises || [];
+      GYM_DATA.favouriteExerciseIds = data.favouriteExerciseIds || [];
+    })
+    .catch(()=>{
+      GYM_DATA.equipment = [];
+      GYM_DATA.exercises = [];
+      GYM_DATA.favouriteExerciseIds = [];
+    });
+  return GYM_DATA_READY;
 }
-function equipmentAvailable(id){ return !STATE.equipmentOff.includes(id); }
+
+function allExercises(){
+  return GYM_DATA.exercises;
+}
+function equipmentAvailable(id){
+  // the server already excludes anything toggled off for this user — any id
+  // present in GYM_DATA.equipment is, by definition, available
+  return GYM_DATA.equipment.some(e=>e.id===id);
+}
 function exerciseUsable(ex){ return ex.equip.every(equipmentAvailable); }
-function exerciseIsRotationOnly(ex){ return ex.equip.some(e=>ROTATION_ONLY_EQUIP.has(e)); }
+function exerciseIsRotationOnly(ex){
+  return ex.equip.some(id=>{
+    const eq = GYM_DATA.equipment.find(e=>e.id===id);
+    return eq && eq.rotationOnly;
+  });
+}
 
 /* =========================================================
    GENERATION LOGIC
@@ -755,7 +787,7 @@ function weightedPick(candidates, recentIds, usedThisWorkout){
   candidates.forEach(ex=>{
     if(usedThisWorkout.has(ex.id)) return;
     let w = 1;
-    if(STATE.favouriteExerciseIds.includes(ex.id)) w *= 2.2;
+    if(GYM_DATA.favouriteExerciseIds.includes(ex.id)) w *= 2.2;
     if(recentIds.has(ex.id)) w *= 0.35;
     for(let i=0;i<Math.round(w*10);i++) weighted.push(ex);
   });
@@ -1959,14 +1991,16 @@ function renderLanding(){
     </div>`;
 }
 
-function selectGroupSize(n){
+async function selectGroupSize(n){
+  if(GYM_DATA_READY) await GYM_DATA_READY; // make sure real equipment/exercise data has arrived before generating
   APP.groupSize = n;
   APP.four = generateFour(n);
   APP.screen = 'picker';
   render();
 }
 
-function reshuffleFour(){
+async function reshuffleFour(){
+  if(GYM_DATA_READY) await GYM_DATA_READY;
   APP.four = generateFour(APP.groupSize);
   render();
 }
@@ -2563,6 +2597,7 @@ async function checkLoginStatus(){
   ACCOUNT.loading = false;
   renderAccountWidget();
   refreshServerRecentHistory(); // don't block the UI on this — repeat-avoidance just uses whatever's cached when generation runs
+  loadGymData(); // equipment/exercises differ between logged-in (personal overlay) and logged-out (master-only) — refresh whenever login state is checked
 }
 
 function signInWithGoogle(){
@@ -2576,6 +2611,7 @@ async function doLogout(){
   ACCOUNT.menuOpen = false;
   SERVER_RECENT_IDS = new Set();
   renderAccountWidget();
+  loadGymData(); // drop back to master-only, read-only data now that personal overrides no longer apply
 }
 
 function toggleAccountMenu(e){
