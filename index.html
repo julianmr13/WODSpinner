@@ -2148,24 +2148,64 @@ function backToPicker(){ clearTimerInterval(); APP.screen='picker'; render(); }
 
 /* ---------- Settings ---------- */
 function renderSettings(){
-  const equipRows = EQUIPMENT.map(eq=>`
+  if(!GYM_DATA.loggedIn){
+    const readOnlyExRows = [...GYM_DATA.exercises].sort((a,b)=>a.pattern.localeCompare(b.pattern)||a.name.localeCompare(b.name)).map(ex=>`
+      <tr><td>${ex.name}</td><td><span class="tag-pill">${ex.pattern}</span></td><td>${ex.equip.map(e=>`<span class="tag-pill">${e}</span>`).join(' ')}</td></tr>`).join('');
+    $main.innerHTML = `
+      <div class="screen">
+        <div class="screen-narrow" style="max-width:1000px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+            <h1 class="page-title" style="font-size:28px;text-align:left;margin:0;">Settings</h1>
+            <button class="btn btn-ghost" onclick="goHome()">Home</button>
+          </div>
+          <p class="empty-state">Sign in to customize your own equipment and exercises. Here's what's currently available:</p>
+          <div class="panel-section">
+            <h3>Equipment</h3>
+            <div class="equip-grid">${GYM_DATA.equipment.map(eq=>`<div class="equip-item">${eq.name}</div>`).join('')}</div>
+          </div>
+          <div class="panel-section">
+            <h3>Exercises</h3>
+            <table class="ex-table">
+              <thead><tr><th>Exercise</th><th>Pattern</th><th>Equipment</th></tr></thead>
+              <tbody>${readOnlyExRows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const masterEquip = GYM_DATA.equipment.filter(e=>!e.personal);
+  const personalEquip = GYM_DATA.equipment.filter(e=>e.personal);
+
+  const equipRows = masterEquip.map(eq=>`
     <label class="equip-item">
-      <input type="checkbox" ${equipmentAvailable(eq.id)?'checked':''} onchange="toggleEquip('${eq.id}')">
+      <input type="checkbox" checked onchange="toggleMyEquipmentOff('${eq.id}', !this.checked)">
       ${eq.name}
     </label>`).join('');
 
-  const exRows = allExercises().sort((a,b)=>a.pattern.localeCompare(b.pattern)||a.name.localeCompare(b.name)).map(ex=>`
+  const personalEquipRows = personalEquip.map(eq=>`
+    <div class="equip-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>${eq.name}${eq.rotationOnly?' <span class="tag-pill">rotation-only</span>':''}</span>
+      <button class="del-btn" onclick="deleteMyEquipment('${eq.id}')">Remove</button>
+    </div>`).join('');
+
+  const exRows = [...GYM_DATA.exercises].sort((a,b)=>a.pattern.localeCompare(b.pattern)||a.name.localeCompare(b.name)).map(ex=>{
+    const removeAction = ex.personal ? `deleteMyExercise('${ex.id}')` : `hideMasterExercise('${ex.id}')`;
+    const removeLabel = ex.personal ? 'Remove' : 'Hide';
+    return `
     <tr>
-      <td>${ex.name}</td>
+      <td>${ex.name}${ex.personal?' <span class="tag-pill">yours</span>':''}</td>
       <td><span class="tag-pill">${ex.pattern}</span></td>
       <td>${ex.equip.map(e=>`<span class="tag-pill">${e}</span>`).join(' ')}</td>
       <td>${ex.trigger?'<span class="tag-pill">trigger</span>':''}</td>
-      <td><button class="fav-star ${STATE.favouriteExerciseIds.includes(ex.id)?'active':''}" onclick="toggleFavExercise('${ex.id}')">&#9733;</button></td>
-      <td><button class="del-btn" onclick="removeExercise('${ex.id}')">Remove</button></td>
-    </tr>`).join('');
+      <td><button class="fav-star ${GYM_DATA.favouriteExerciseIds.includes(ex.id)?'active':''}" onclick="toggleMyFavouriteExercise('${ex.id}')">&#9733;</button></td>
+      <td><button class="del-btn" onclick="${removeAction}">${removeLabel}</button></td>
+    </tr>`;
+  }).join('');
 
   const patternOptions = PATTERNS.map(p=>`<option value="${p}">${p}</option>`).join('');
-  const equipOptions = EQUIPMENT.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  const equipOptions = GYM_DATA.equipment.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
 
   $main.innerHTML = `
     <div class="screen">
@@ -2178,6 +2218,14 @@ function renderSettings(){
         <div class="panel-section">
           <h3>Equipment on hand</h3>
           <div class="equip-grid">${equipRows}</div>
+          ${personalEquip.length ? `<h3 style="margin-top:16px;">Your custom equipment</h3><div class="equip-grid">${personalEquipRows}</div>` : ''}
+          <div class="add-ex-form">
+            <input id="new-eq-name" placeholder="Custom equipment name">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);">
+              <input type="checkbox" id="new-eq-rotation"> Single-capacity / rotation-only
+            </label>
+            <button class="btn btn-primary" onclick="addMyEquipment()">Add equipment</button>
+          </div>
         </div>
 
         <div class="panel-section">
@@ -2196,29 +2244,74 @@ function renderSettings(){
               <option value="time">time (s)</option>
             </select>
             <input id="new-ex-base" type="number" placeholder="base amount" value="10" style="width:110px">
-            <button class="btn btn-primary" onclick="addExercise()">Add exercise</button>
+            <button class="btn btn-primary" onclick="addMyExercise()">Add exercise</button>
           </div>
         </div>
       </div>
     </div>`;
 }
-function toggleEquip(id){
-  if(STATE.equipmentOff.includes(id)) STATE.equipmentOff = STATE.equipmentOff.filter(x=>x!==id);
-  else STATE.equipmentOff.push(id);
-  saveState();
-}
-function toggleFavExercise(id){
-  if(STATE.favouriteExerciseIds.includes(id)) STATE.favouriteExerciseIds = STATE.favouriteExerciseIds.filter(x=>x!==id);
-  else STATE.favouriteExerciseIds.push(id);
-  saveState();
+
+async function toggleMyEquipmentOff(id, off){
+  try{
+    await fetch('/api/my/equipment-off', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ equipmentId:id, off }),
+    });
+  }catch(e){}
+  await loadGymData();
   render();
 }
-function removeExercise(id){
-  STATE.removedExerciseIds.push(id);
-  saveState();
+
+async function addMyEquipment(){
+  const name = document.getElementById('new-eq-name').value.trim();
+  const rotationOnly = document.getElementById('new-eq-rotation').checked;
+  if(!name){ alert('Give it a name.'); return; }
+  try{
+    await fetch('/api/my/equipment', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, rotationOnly }),
+    });
+  }catch(e){ alert('Something went wrong adding that.'); }
+  await loadGymData();
   render();
 }
-function addExercise(){
+
+async function deleteMyEquipment(id){
+  try{ await fetch('/api/my/equipment/'+id, { method:'DELETE' }); }catch(e){}
+  await loadGymData();
+  render();
+}
+
+async function toggleMyFavouriteExercise(id){
+  const isFav = GYM_DATA.favouriteExerciseIds.includes(id);
+  try{
+    await fetch('/api/my/favourite-exercises', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ exerciseId:id, favourite: !isFav }),
+    });
+  }catch(e){}
+  await loadGymData();
+  render();
+}
+
+async function hideMasterExercise(id){
+  try{
+    await fetch('/api/my/hidden-exercises', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ exerciseId:id, hidden:true }),
+    });
+  }catch(e){}
+  await loadGymData();
+  render();
+}
+
+async function deleteMyExercise(id){
+  try{ await fetch('/api/my/exercises/'+id, { method:'DELETE' }); }catch(e){}
+  await loadGymData();
+  render();
+}
+
+async function addMyExercise(){
   const name = document.getElementById('new-ex-name').value.trim();
   const pattern = document.getElementById('new-ex-pattern').value;
   const unit = document.getElementById('new-ex-unit').value;
@@ -2226,9 +2319,13 @@ function addExercise(){
   const equipSel = document.getElementById('new-ex-equip');
   const equip = Array.from(equipSel.selectedOptions).map(o=>o.value);
   if(!name || equip.length===0){ alert('Give it a name and at least one equipment tag.'); return; }
-  const id = 'custom_'+Date.now();
-  STATE.customExercises.push({id,name,pattern,equip,unit,base});
-  saveState();
+  try{
+    await fetch('/api/my/exercises', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, pattern, equip, unit, base }),
+    });
+  }catch(e){ alert('Something went wrong adding that.'); }
+  await loadGymData();
   render();
 }
 
