@@ -570,41 +570,6 @@ async function handleGymData(request, env){
     favouriteExerciseIds: favRows.results.map(r=>r.exercise_id),
   });
 }
-
-  const [offRows, customEquipRows, hiddenRows, customExRows, favRows] = await Promise.all([
-    env.DB.prepare('SELECT equipment_id FROM user_equipment_off WHERE user_id = ?').bind(user.id).all(),
-    env.DB.prepare('SELECT id, name, rotation_only FROM user_equipment_custom WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
-    env.DB.prepare('SELECT exercise_id FROM user_hidden_exercises WHERE user_id = ?').bind(user.id).all(),
-    env.DB.prepare('SELECT id, name, pattern, equip_json, unit, base, intensity, cue FROM user_exercises WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
-    env.DB.prepare('SELECT exercise_id FROM user_favourite_exercises WHERE user_id = ?').bind(user.id).all(),
-  ]);
-
-  const offIds = new Set(offRows.results.map(r=>r.equipment_id));
-  const hiddenIds = new Set(hiddenRows.results.map(r=>r.exercise_id));
-
-  const equipment = [
-    ...masterEquip.filter(e=>!offIds.has(e.id)).map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:false })),
-    ...customEquipRows.results.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:true })),
-  ];
-  const exercises = [
-    ...masterEx.filter(e=>!hiddenIds.has(e.id)).map(e=>({
-      id:e.id, name:e.name, pattern:e.pattern, equip:JSON.parse(e.equip_json),
-      unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:!!e.is_trigger, personal:false,
-    })),
-    ...customExRows.results.map(e=>({
-      id:e.id, name:e.name, pattern:e.pattern, equip:JSON.parse(e.equip_json),
-      unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:false, personal:true,
-    })),
-  ];
-
-  return json({
-    loggedIn: true,
-    equipment,
-    exercises,
-    favouriteExerciseIds: favRows.results.map(r=>r.exercise_id),
-  });
-}
-
 // ---- personal equipment ----
 
 async function handleToggleEquipmentOff(request, env){
