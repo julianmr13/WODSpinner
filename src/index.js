@@ -412,8 +412,14 @@ async function handleAdminUpdateEquipment(request, env, id){
 async function handleAdminDeleteEquipment(request, env, id){
   const admin = await requireAdmin(request, env);
   if(!admin) return json({error:'Forbidden'}, 403);
-  await env.DB.prepare('DELETE FROM master_equipment WHERE id=?').bind(id).run();
-  return json({ ok:true });
+  try {
+    await env.DB.prepare('UPDATE user_equipment_custom SET promoted_master_id = NULL WHERE promoted_master_id = ?').bind(id).run();
+    await env.DB.prepare('DELETE FROM user_equipment_off WHERE equipment_id = ?').bind(id).run();
+    await env.DB.prepare('DELETE FROM master_equipment WHERE id=?').bind(id).run();
+    return json({ ok:true });
+  } catch(err) {
+    return json({ error:'Delete failed', detail: String(err && err.message || err) }, 500);
+  }
 }
 
 // ---- admin: master exercise management ----
@@ -456,8 +462,14 @@ async function handleAdminUpdateExercise(request, env, id){
 async function handleAdminDeleteExercise(request, env, id){
   const admin = await requireAdmin(request, env);
   if(!admin) return json({error:'Forbidden'}, 403);
-  await env.DB.prepare('DELETE FROM master_exercises WHERE id=?').bind(id).run();
-  return json({ ok:true });
+  try {
+    await env.DB.prepare('UPDATE user_exercises SET promoted_master_id = NULL WHERE promoted_master_id = ?').bind(id).run();
+    await env.DB.prepare('DELETE FROM user_hidden_exercises WHERE exercise_id = ?').bind(id).run();
+    await env.DB.prepare('DELETE FROM master_exercises WHERE id=?').bind(id).run();
+    return json({ ok:true });
+  } catch(err) {
+    return json({ error:'Delete failed', detail: String(err && err.message || err) }, 500);
+  }
 }
 
 // ---- popularity (aggregated across everyone, not just the current user) ----
