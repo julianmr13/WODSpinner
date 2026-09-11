@@ -64,6 +64,18 @@ export default {
         return handleDeleteFavourite(request, env, path.slice('/api/favourites/'.length));
       }
       if (path === '/api/popular') return handlePopular(request, env);
+      if (path === '/api/gym-data') return handleGymData(request, env);
+      if (path === '/api/my/equipment-off' && request.method === 'PUT') return handleToggleEquipmentOff(request, env);
+      if (path === '/api/my/equipment' && request.method === 'POST') return handleAddMyEquipment(request, env);
+      if (path.startsWith('/api/my/equipment/') && request.method === 'DELETE') {
+        return handleDeleteMyEquipment(request, env, path.slice('/api/my/equipment/'.length));
+      }
+      if (path === '/api/my/hidden-exercises' && request.method === 'PUT') return handleToggleHiddenExercise(request, env);
+      if (path === '/api/my/exercises' && request.method === 'POST') return handleAddMyExercise(request, env);
+      if (path.startsWith('/api/my/exercises/') && request.method === 'DELETE') {
+        return handleDeleteMyExercise(request, env, path.slice('/api/my/exercises/'.length));
+      }
+      if (path === '/api/my/favourite-exercises' && request.method === 'PUT') return handleToggleFavouriteExercise(request, env);
       if (path === '/api/history' && request.method === 'POST') return handleAddHistory(request, env);
       if (path === '/api/history/recent') return handleRecentHistory(request, env);
       if (path === '/api/admin/equipment' && request.method === 'GET') return handleAdminListEquipment(request, env);
@@ -498,6 +510,156 @@ async function handleAdminDeleteExercise(request, env, id){
   } catch(err) {
     return json({ error:'Delete failed', detail: String(err && err.message || err) }, 500);
   }
+}
+
+// ---- effective gym data: master lists minus personal hides/off, plus
+// personal additions — logged-out users get master-only, read-only ----
+
+async function handleGymData(request, env){
+  const user = await getSessionUser(request, env);
+
+  const { results: masterEquip } = await env.DB.prepare(
+    'SELECT id, name, rotation_only FROM master_equipment ORDER BY name'
+  ).all();
+  const { results: masterEx } = await env.DB.prepare(
+    'SELECT id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger FROM master_exercises ORDER BY name'
+  ).all();
+
+  if(!user){
+    return json({
+      loggedIn: false,
+      equipment: masterEquip.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:false })),
+      exercises: masterEx.map(e=>({
+        id:e.id, name:e.name, pattern:e.pattern, equip:JSON.parse(e.equip_json),
+        unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:!!e.is_trigger, personal:false,
+      })),
+      favouriteExerciseIds: [],
+    });
+  }
+
+  const [offRows, customEquipRows, hiddenRows, customExRows, favRows] = await Promise.all([
+    env.DB.prepare('SELECT equipment_id FROM user_equipment_off WHERE user_id = ?').bind(user.id).all(),
+    env.DB.prepare('SELECT id, name, rotation_only FROM user_equipment_custom WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
+    env.DB.prepare('SELECT exercise_id FROM user_hidden_exercises WHERE user_id = ?').bind(user.id).all(),
+    env.DB.prepare('SELECT id, name, pattern, equip_json, unit, base, intensity, cue FROM user_exercises WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
+    env.DB.prepare('SELECT exercise_id FROM user_favourite_exercises WHERE user_id = ?').bind(user.id).all(),
+  ]);
+
+  const offIds = new Set(offRows.results.map(r=>r.equipment_id));
+  const hiddenIds = new Set(hiddenRows.results.map(r=>r.exercise_id));
+
+  const equipment = [
+    ...masterEquip.filter(e=>!offIds.has(e.id)).map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:false })),
+    ...customEquipRows.results.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:true })),
+  ];
+  const exercises = [
+    ...masterEx.filter(e=>!hiddenIds.has(e.id)).map(e=>({
+      id:e.id, name:e.name, pattern:e.pattern, equip:JSON.parse(e.equip_json),
+      unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:!!e.is_trigger, personal:false,
+    })),
+    ...customExRows.results.map(e=>({
+      id:e.id, name:e.name, pattern:e.pattern, equip:JSON.parse(e.equip_json),
+      unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:false, personal:true,
+    })),
+  ];
+
+  return json({
+    loggedIn: true,
+    equipment,
+    exercises,
+    favouriteExerciseIds: favRows.results.map(r=>r.exercise_id),
+  });
+}
+
+// ---- personal equipment ----
+
+async function handleToggleEquipmentOff(request, env){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { equipmentId, off } = body || {};
+  if(!equipmentId) return json({error:'Missing equipmentId'}, 400);
+  if(off){
+    await env.DB.prepare('INSERT OR IGNORE INTO user_equipment_off (user_id, equipment_id) VALUES (?, ?)').bind(user.id, equipmentId).run();
+  } else {
+    await env.DB.prepare('DELETE FROM user_equipment_off WHERE user_id = ? AND equipment_id = ?').bind(user.id, equipmentId).run();
+  }
+  return json({ ok:true });
+}
+
+async function handleAddMyEquipment(request, env){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { name, rotationOnly } = body || {};
+  if(!name) return json({error:'Missing name'}, 400);
+  const id = generateId(12);
+  await env.DB.prepare(
+    'INSERT INTO user_equipment_custom (id, user_id, name, rotation_only, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).bind(id, user.id, name, rotationOnly?1:0, Date.now()).run();
+  return json({ id }, 201);
+}
+
+async function handleDeleteMyEquipment(request, env, id){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  await env.DB.prepare('DELETE FROM user_equipment_custom WHERE id = ? AND user_id = ?').bind(id, user.id).run();
+  return json({ ok:true });
+}
+
+// ---- personal exercises ----
+
+async function handleToggleHiddenExercise(request, env){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { exerciseId, hidden } = body || {};
+  if(!exerciseId) return json({error:'Missing exerciseId'}, 400);
+  if(hidden){
+    await env.DB.prepare('INSERT OR IGNORE INTO user_hidden_exercises (user_id, exercise_id) VALUES (?, ?)').bind(user.id, exerciseId).run();
+  } else {
+    await env.DB.prepare('DELETE FROM user_hidden_exercises WHERE user_id = ? AND exercise_id = ?').bind(user.id, exerciseId).run();
+  }
+  return json({ ok:true });
+}
+
+async function handleAddMyExercise(request, env){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { name, pattern, equip, unit, base, intensity, cue } = body || {};
+  if(!name || !pattern || !equip || !unit) return json({error:'Missing required fields'}, 400);
+  const id = generateId(12);
+  await env.DB.prepare(
+    'INSERT INTO user_exercises (id, user_id, name, pattern, equip_json, unit, base, intensity, cue, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, user.id, name, pattern, JSON.stringify(equip), unit, base||10, intensity||2, cue||'', Date.now()).run();
+  return json({ id }, 201);
+}
+
+async function handleDeleteMyExercise(request, env, id){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  await env.DB.prepare('DELETE FROM user_exercises WHERE id = ? AND user_id = ?').bind(id, user.id).run();
+  return json({ ok:true });
+}
+
+async function handleToggleFavouriteExercise(request, env){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const { exerciseId, favourite } = body || {};
+  if(!exerciseId) return json({error:'Missing exerciseId'}, 400);
+  if(favourite){
+    await env.DB.prepare('INSERT OR IGNORE INTO user_favourite_exercises (user_id, exercise_id) VALUES (?, ?)').bind(user.id, exerciseId).run();
+  } else {
+    await env.DB.prepare('DELETE FROM user_favourite_exercises WHERE user_id = ? AND exercise_id = ?').bind(user.id, exerciseId).run();
+  }
+  return json({ ok:true });
 }
 
 // ---- popularity (aggregated across everyone, not just the current user) ----
