@@ -740,12 +740,14 @@ function loadGymData(){
 }
 
 function allExercises(){
-  return GYM_DATA.exercises;
+  // exclude hidden ones here — this is what the generator uses. Settings
+  // shows the unfiltered GYM_DATA.exercises directly so hidden items stay
+  // visible (and un-hideable) rather than disappearing outright.
+  return GYM_DATA.exercises.filter(e=>!e.hidden);
 }
 function equipmentAvailable(id){
-  // the server already excludes anything toggled off for this user — any id
-  // present in GYM_DATA.equipment is, by definition, available
-  return GYM_DATA.equipment.some(e=>e.id===id);
+  const eq = GYM_DATA.equipment.find(e=>e.id===id);
+  return !!eq && !eq.off;
 }
 function exerciseUsable(ex){ return ex.equip.every(equipmentAvailable); }
 function exerciseIsRotationOnly(ex){
@@ -2175,12 +2177,15 @@ function renderSettings(){
     return;
   }
 
-  const masterEquip = GYM_DATA.equipment.filter(e=>!e.personal);
+  const masterEquip = [...GYM_DATA.equipment.filter(e=>!e.personal)].sort((a,b)=>{
+    if(a.off !== b.off) return a.off ? 1 : -1; // selected equipment first, deselected sinks to the bottom
+    return a.name.localeCompare(b.name);
+  });
   const personalEquip = GYM_DATA.equipment.filter(e=>e.personal);
 
   const equipRows = masterEquip.map(eq=>`
-    <label class="equip-item">
-      <input type="checkbox" checked onchange="toggleMyEquipmentOff('${eq.id}', !this.checked)">
+    <label class="equip-item" style="${eq.off?'opacity:0.5;':''}">
+      <input type="checkbox" ${eq.off?'':'checked'} onchange="toggleMyEquipmentOff('${eq.id}', !this.checked)">
       ${eq.name}
     </label>`).join('');
 
@@ -2191,10 +2196,10 @@ function renderSettings(){
     </div>`).join('');
 
   const exRows = [...GYM_DATA.exercises].sort((a,b)=>a.pattern.localeCompare(b.pattern)||a.name.localeCompare(b.name)).map(ex=>{
-    const removeAction = ex.personal ? `deleteMyExercise('${ex.id}')` : `hideMasterExercise('${ex.id}')`;
-    const removeLabel = ex.personal ? 'Remove' : 'Hide';
+    const removeAction = ex.personal ? `deleteMyExercise('${ex.id}')` : `toggleHiddenExercise('${ex.id}', ${ex.hidden?'false':'true'})`;
+    const removeLabel = ex.personal ? 'Remove' : (ex.hidden ? 'Unhide' : 'Hide');
     return `
-    <tr>
+    <tr style="${ex.hidden?'opacity:0.5;':''}">
       <td>${ex.name}${ex.personal?' <span class="tag-pill">yours</span>':''}</td>
       <td><span class="tag-pill">${ex.pattern}</span></td>
       <td>${ex.equip.map(e=>`<span class="tag-pill">${e}</span>`).join(' ')}</td>
@@ -2294,11 +2299,11 @@ async function toggleMyFavouriteExercise(id){
   render();
 }
 
-async function hideMasterExercise(id){
+async function toggleHiddenExercise(id, hidden){
   try{
     await fetch('/api/my/hidden-exercises', {
       method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ exerciseId:id, hidden:true }),
+      body: JSON.stringify({ exerciseId:id, hidden }),
     });
   }catch(e){}
   await loadGymData();
