@@ -2415,7 +2415,11 @@ function adminEditEquipment(id){ ADMIN.editingEquipmentId = id; renderAdmin(); }
 function adminCancelEditEquipment(){ ADMIN.editingEquipmentId = null; renderAdmin(); }
 async function adminDeleteEquipment(id){
   if(!confirm('Delete this equipment from the master list? This may affect exercises that use it.')) return;
-  try{ await fetch('/api/admin/equipment/'+id, { method:'DELETE' }); }catch(e){}
+  try{
+    const resp = await fetch('/api/admin/equipment/'+id, { method:'DELETE' });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok) alert('Delete failed: ' + (data.detail || data.error || resp.status));
+  }catch(e){ alert('Delete failed: ' + e.message); }
   await loadAdminData();
 }
 
@@ -2451,7 +2455,11 @@ function adminEditExercise(id){ ADMIN.editingExerciseId = id; renderAdmin(); }
 function adminCancelEditExercise(){ ADMIN.editingExerciseId = null; renderAdmin(); }
 async function adminDeleteExercise(id){
   if(!confirm('Delete this exercise from the master list?')) return;
-  try{ await fetch('/api/admin/exercises/'+id, { method:'DELETE' }); }catch(e){}
+  try{
+    const resp = await fetch('/api/admin/exercises/'+id, { method:'DELETE' });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok) alert('Delete failed: ' + (data.detail || data.error || resp.status));
+  }catch(e){ alert('Delete failed: ' + e.message); }
   await loadAdminData();
 }
 
