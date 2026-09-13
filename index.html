@@ -46,7 +46,8 @@
     flex-shrink:0;
   }
   #spotify-banner:empty{display:none;}
-  #spotify-banner{
+  #import-banner:empty{display:none;}
+  #spotify-banner, #import-banner{
     display:flex;
     align-items:center;
     justify-content:space-between;
@@ -57,12 +58,12 @@
     color:#ffb3ab;
     font-size:13px;
   }
-  #spotify-banner button{
+  #spotify-banner button, #import-banner button{
     background:none;border:1px solid #ffb3ab;color:#ffb3ab;
     padding:5px 12px;font-size:12px;cursor:pointer;flex-shrink:0;
   }
-  #spotify-banner.ok{background:#123822;border-bottom:1px solid var(--green);color:#a8f0c6;}
-  #spotify-banner.ok button{border-color:#a8f0c6;color:#a8f0c6;}
+  #spotify-banner.ok, #import-banner.ok{background:#123822;border-bottom:1px solid var(--green);color:#a8f0c6;}
+  #spotify-banner.ok button, #import-banner.ok button{border-color:#a8f0c6;color:#a8f0c6;}
   .brand{
     display:flex;
     align-items:center;
@@ -559,6 +560,7 @@
   </div>
 </div>
 <div id="spotify-banner"></div>
+<div id="import-banner"></div>
 <main id="main"></main>
 
 <script>
@@ -737,6 +739,86 @@ function loadGymData(){
       GYM_DATA.favouriteExerciseIds = [];
     });
   return GYM_DATA_READY;
+}
+
+/* =========================================================
+   ONE-TIME IMPORT of pre-account local customizations
+   (equipment toggles, custom exercises, hidden exercises,
+   favourite exercises saved in this browser before login existed)
+   ========================================================= */
+const LEGACY_IMPORT_FLAG = 'wodspinner_legacy_imported_v1';
+
+function hasLegacyDataToImport(){
+  return STATE.equipmentOff.length>0 || STATE.customExercises.length>0
+    || STATE.removedExerciseIds.length>0 || STATE.favouriteExerciseIds.length>0;
+}
+function legacyImportAlreadyHandled(){
+  try{ return localStorage.getItem(LEGACY_IMPORT_FLAG) === '1'; }catch(e){ return true; }
+}
+function markLegacyImportHandled(){
+  try{ localStorage.setItem(LEGACY_IMPORT_FLAG, '1'); }catch(e){}
+}
+function shouldShowImportBanner(){
+  return ACCOUNT.loggedIn && !legacyImportAlreadyHandled() && hasLegacyDataToImport();
+}
+
+function renderImportBanner(){
+  const el = document.getElementById('import-banner');
+  if(!el) return;
+  if(!shouldShowImportBanner()){ el.innerHTML=''; el.className=''; return; }
+  el.className = 'ok';
+  el.innerHTML = `
+    <span>Found equipment/exercise customizations saved in this browser from before you signed in — import them to your account?</span>
+    <span style="display:flex;gap:8px;flex-shrink:0;">
+      <button onclick="runLegacyImport()">Import</button>
+      <button onclick="skipLegacyImport()">Skip</button>
+    </span>`;
+}
+
+async function runLegacyImport(){
+  // best-effort, item by item — one bad/stale id (e.g. equipment that no
+  // longer exists in the master list) shouldn't block the rest of the import
+  for(const id of STATE.equipmentOff){
+    try{
+      await fetch('/api/my/equipment-off', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ equipmentId:id, off:true }),
+      });
+    }catch(e){}
+  }
+  for(const ex of STATE.customExercises){
+    try{
+      await fetch('/api/my/exercises', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name:ex.name, pattern:ex.pattern, equip:ex.equip, unit:ex.unit, base:ex.base }),
+      });
+    }catch(e){}
+  }
+  for(const id of STATE.removedExerciseIds){
+    try{
+      await fetch('/api/my/hidden-exercises', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ exerciseId:id, hidden:true }),
+      });
+    }catch(e){}
+  }
+  for(const id of STATE.favouriteExerciseIds){
+    try{
+      await fetch('/api/my/favourite-exercises', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ exerciseId:id, favourite:true }),
+      });
+    }catch(e){}
+  }
+  markLegacyImportHandled();
+  await loadGymData();
+  renderImportBanner();
+  render();
+}
+
+function skipLegacyImport(){
+  markLegacyImportHandled();
+  renderImportBanner();
 }
 
 function allExercises(){
@@ -1945,6 +2027,7 @@ function setNavActive(){
 function render(){
   setNavActive();
   renderSpotifyBanner();
+  renderImportBanner();
   if(APP.screen==='landing') return renderLanding();
   if(APP.screen==='picker') return renderPicker();
   if(APP.screen==='full') return renderFull();
@@ -2698,6 +2781,7 @@ async function checkLoginStatus(){
   }
   ACCOUNT.loading = false;
   renderAccountWidget();
+  renderImportBanner(); // show the one-time legacy-data import prompt now that we know whether they're logged in
   refreshServerRecentHistory(); // don't block the UI on this — repeat-avoidance just uses whatever's cached when generation runs
   loadGymData(); // equipment/exercises differ between logged-in (personal overlay) and logged-out (master-only) — refresh whenever login state is checked
 }
