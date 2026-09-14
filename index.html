@@ -528,6 +528,11 @@
   .fav-star.active{color:var(--yellow);}
   .del-btn{background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:13px;}
   .del-btn:hover{color:var(--red);}
+  .pop-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border-soft);}
+  .pop-row-label{flex:0 0 180px;font-size:14px;color:var(--text);}
+  .pop-row-bar-wrap{flex:1;background:var(--panel-2);height:10px;}
+  .pop-row-bar{height:100%;background:var(--yellow);}
+  .pop-row-count{flex:0 0 32px;text-align:right;font-family:var(--font-mono);font-size:13px;color:var(--text-dim);}
   .add-ex-form{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
   .add-ex-form input, .add-ex-form select{
     background:var(--panel-2);border:1px solid var(--border);color:var(--text);
@@ -556,6 +561,7 @@
     <span class="brand-name">WOD Spinner</span>
   </button>
   <div class="nav-actions">
+    <button class="nav-btn" onclick="showPopular()">Popular</button>
     <div id="account-widget"></div>
   </div>
 </div>
@@ -2050,6 +2056,7 @@ function goHome(){ clearTimerInterval(); APP.screen='landing'; render(); }
 function showFavourites(){ clearTimerInterval(); APP.screen='favourites'; render(); }
 function showSettings(){ clearTimerInterval(); APP.screen='settings'; render(); }
 function showAdmin(){ clearTimerInterval(); APP.screen='admin'; ADMIN.loaded=false; render(); }
+function showPopular(){ clearTimerInterval(); APP.screen='popular'; POPULAR.loaded=false; render(); }
 
 function setNavActive(){
   // Favourites/Settings buttons now live inside the account menu (only
@@ -2071,6 +2078,7 @@ function render(){
   if(APP.screen==='settings') return renderSettings();
   if(APP.screen==='favourites') return renderFavourites();
   if(APP.screen==='admin') return renderAdmin();
+  if(APP.screen==='popular') return renderPopular();
 }
 
 function renderSpotifyBanner(){
@@ -2766,6 +2774,93 @@ async function adminDeleteExercise(id){
     if(!resp.ok) alert('Delete failed: ' + (data.detail || data.error || resp.status));
   }catch(e){ alert('Delete failed: ' + e.message); }
   await loadAdminData();
+}
+
+/* ---------- Popular (gym-wide, based on real session history) ---------- */
+let POPULAR = { loaded:false, loading:false, popularFormats:[], popularExercises:[], totalSessions:0 };
+
+async function loadPopularData(){
+  POPULAR.loading = true;
+  try{
+    const resp = await fetch('/api/popular');
+    const data = await resp.json();
+    POPULAR.popularFormats = data.popularFormats || [];
+    POPULAR.popularExercises = data.popularExercises || [];
+    POPULAR.totalSessions = data.totalSessions || 0;
+    POPULAR.loaded = true;
+  }catch(e){
+    POPULAR.popularFormats = [];
+    POPULAR.popularExercises = [];
+    POPULAR.totalSessions = 0;
+  }
+  POPULAR.loading = false;
+  renderPopular();
+}
+
+function renderPopular(){
+  if(!POPULAR.loaded){
+    $main.innerHTML = `<div class="screen"><div class="screen-narrow"><p class="empty-state">Loading&hellip;</p></div></div>`;
+    if(!POPULAR.loading) loadPopularData();
+    return;
+  }
+
+  if(POPULAR.totalSessions===0){
+    $main.innerHTML = `
+      <div class="screen">
+        <div class="screen-narrow">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+            <h1 class="page-title" style="font-size:28px;text-align:left;margin:0;">Popular</h1>
+            <button class="btn btn-ghost" onclick="goHome()">Home</button>
+          </div>
+          <p class="empty-state">Nothing logged yet \u2014 once people start a few workouts, the most-used formats and exercises will show up here.</p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const maxFormatCount = Math.max(...POPULAR.popularFormats.map(f=>f.count));
+  const formatRows = POPULAR.popularFormats.map(f=>{
+    const pct = Math.round((f.count/maxFormatCount)*100);
+    const label = (FORMATS[f.format] && FORMATS[f.format].name) || f.format;
+    return `
+      <div class="pop-row">
+        <div class="pop-row-label">${label}</div>
+        <div class="pop-row-bar-wrap"><div class="pop-row-bar" style="width:${pct}%"></div></div>
+        <div class="pop-row-count">${f.count}</div>
+      </div>`;
+  }).join('');
+
+  const maxExCount = Math.max(...POPULAR.popularExercises.map(e=>e.count));
+  const exerciseRows = POPULAR.popularExercises.map(e=>{
+    const pct = Math.round((e.count/maxExCount)*100);
+    return `
+      <div class="pop-row">
+        <div class="pop-row-label">${e.name}</div>
+        <div class="pop-row-bar-wrap"><div class="pop-row-bar" style="width:${pct}%"></div></div>
+        <div class="pop-row-count">${e.count}</div>
+      </div>`;
+  }).join('');
+
+  $main.innerHTML = `
+    <div class="screen">
+      <div class="screen-narrow">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <h1 class="page-title" style="font-size:28px;text-align:left;margin:0;">Popular</h1>
+          <button class="btn btn-ghost" onclick="goHome()">Home</button>
+        </div>
+        <p class="empty-state" style="margin-bottom:24px;">Based on ${POPULAR.totalSessions} logged session${POPULAR.totalSessions===1?'':'s'} across everyone.</p>
+
+        <div class="panel-section">
+          <h3>Most-used formats</h3>
+          ${formatRows}
+        </div>
+
+        <div class="panel-section">
+          <h3>Most-used exercises</h3>
+          ${exerciseRows}
+        </div>
+      </div>
+    </div>`;
 }
 
 /* ---------- Favourites ---------- */
