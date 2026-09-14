@@ -451,35 +451,37 @@
   }
   .celebration-card{
     position:relative; background:var(--panel); border:1px solid var(--border);
-    max-width:520px; width:100%; padding:44px 32px 32px;
+    max-width:min(780px, 92vw); width:100%; padding:clamp(40px,5vw,64px) clamp(32px,4vw,56px) clamp(32px,4vw,48px);
     text-align:center; overflow:hidden;
   }
   .celebration-close{
-    position:absolute; top:10px; right:10px;
+    position:absolute; top:12px; right:12px;
     background:none; border:none; color:var(--text-faint);
-    font-size:30px; line-height:1; cursor:pointer; padding:6px 10px; z-index:3;
+    font-size:clamp(28px, 2.4vw, 38px); line-height:1; cursor:pointer; padding:6px 10px; z-index:3;
   }
   .celebration-close:hover{color:var(--text);}
   .celebration-message{
-    font-family:var(--font-head); font-size:25px; font-weight:800; line-height:1.3;
-    margin:6px 0 10px 0; position:relative; z-index:2;
+    font-family:var(--font-head); font-size:clamp(26px, 3vw, 40px); font-weight:800; line-height:1.3;
+    margin:10px 0 14px 0; position:relative; z-index:2;
   }
-  .celebration-meta{color:var(--text-dim); font-size:14px; margin-bottom:28px; position:relative; z-index:2;}
-  .celebration-feedback{position:relative; z-index:2; border-top:1px solid var(--border-soft); padding-top:24px; min-height:36px;}
-  .celebration-feedback-label{font-size:15px; color:var(--text-dim); margin-bottom:14px;}
-  .celebration-feedback-btns{display:flex; gap:10px; justify-content:center; flex-wrap:wrap;}
+  .celebration-meta{color:var(--text-dim); font-size:clamp(15px, 1.3vw, 19px); margin-bottom:clamp(28px,3vw,40px); position:relative; z-index:2;}
+  .celebration-feedback{position:relative; z-index:2; border-top:1px solid var(--border-soft); padding-top:clamp(24px,2.6vw,34px); min-height:36px;}
+  .celebration-feedback-label{font-size:clamp(16px, 1.4vw, 20px); color:var(--text-dim); margin-bottom:16px;}
+  .celebration-feedback-btns{display:flex; gap:12px; justify-content:center; flex-wrap:wrap;}
   .celebration-feedback-btns button{
-    font-family:var(--font-body); font-size:14px; font-weight:700;
-    padding:13px 20px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);
+    font-family:var(--font-body); font-size:clamp(15px, 1.2vw, 18px); font-weight:700;
+    padding:clamp(14px,1.3vw,18px) clamp(22px,2vw,30px); border:1px solid var(--border); background:var(--panel-2); color:var(--text);
     cursor:pointer; transition:border-color .15s, transform .1s;
   }
   .celebration-feedback-btns button:hover{border-color:var(--yellow); transform:translateY(-2px);}
-  .celebration-thanks{font-size:15px; color:var(--green); font-weight:600;}
+  .celebration-thanks{font-size:clamp(16px, 1.4vw, 20px); color:var(--green); font-weight:600;}
   .confetti-layer{position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:1;}
-  .confetti-piece{position:absolute; top:-20px; animation-name:confetti-fall; animation-timing-function:linear; animation-fill-mode:forwards;}
+  .confetti-piece{position:absolute; top:-20px; animation-name:confetti-fall; animation-timing-function:linear; animation-iteration-count:infinite;}
   @keyframes confetti-fall{
-    0%{ transform:translateY(0) rotate(0deg); opacity:1; }
-    100%{ transform:translateY(520px) rotate(var(--rot,540deg)); opacity:0.85; }
+    0%{ transform:translateY(0) rotate(0deg); opacity:0; }
+    8%{ opacity:1; }
+    88%{ opacity:1; }
+    100%{ transform:translateY(680px) rotate(var(--rot,540deg)); opacity:0; }
   }
 
   /* ---------- Spotify ---------- */
@@ -1520,8 +1522,28 @@ function beep(freq, durMs, vol, waveform){
     osc.stop(now+dur);
   }catch(e){}
 }
-function playWarnBeep(){ beep(740,140,0.4,'sine'); }               // soft-toned but louder "bip"
-function playIntervalEndBeep(){ beep(950,600,0.55,'square'); }    // sharp, prominent "beeeep"
+function playWarnBeep(){ beep(650,210,0.4,'triangle'); }           // 3-2-1 countdown bip
+function playIntervalEndBeep(){ beep(650,720,0.4,'triangle'); }    // normal phase-transition beep
+
+// A short, cheerful ascending run for the very end of the whole workout —
+// plays instead of the normal single transition beep, timed to land right
+// as the celebration modal appears. Each note is {freq, dur, start} in Hz/ms,
+// scheduled from the moment the melody starts (t=0).
+const CELEBRATION_MELODY = [
+  { freq: 523,  dur: 130,  start: 0    }, // C5
+  { freq: 659,  dur: 130,  start: 140  }, // E5
+  { freq: 784,  dur: 130,  start: 280  }, // G5
+  { freq: 1047, dur: 150,  start: 420  }, // C6
+  { freq: 784,  dur: 110,  start: 590  }, // G5 (little bounce back down)
+  { freq: 1047, dur: 130,  start: 720  }, // C6
+  { freq: 1319, dur: 130,  start: 870  }, // E6
+  { freq: 1568, dur: 1020, start: 1020 }, // G6 — held, triumphant finish
+];
+function playCelebrationMelody(){
+  CELEBRATION_MELODY.forEach(note=>{
+    setTimeout(()=>beep(note.freq, note.dur, 0.4, 'triangle'), note.start);
+  });
+}
 
 // duck Spotify playback under the 3-2-1 warning beeps + transition beep so
 // they're actually audible over music, then restore normal volume shortly after
@@ -1633,11 +1655,15 @@ function timerTick(){
     }
   }
   if(remainingMs<=0){
-    playIntervalEndBeep();
-    spotifyDuck(); // covers phases shorter than 4s where the early duck never fired
-    setTimeout(spotifyUnduck, 900);
     const nextIdx = TIMER.phaseIndex+1;
-    if(nextIdx >= TIMER.program.phases.length){
+    const isWorkoutComplete = nextIdx >= TIMER.program.phases.length;
+    if(isWorkoutComplete) playCelebrationMelody();
+    else playIntervalEndBeep();
+    spotifyDuck(); // covers phases shorter than 4s where the early duck never fired
+    // give the melody room to actually finish before restoring music volume;
+    // the normal single beep only needs the usual short buffer
+    setTimeout(spotifyUnduck, isWorkoutComplete ? 2100 : 900);
+    if(isWorkoutComplete){
       // workout complete
       clearTimerInterval();
       TIMER.running = false;
