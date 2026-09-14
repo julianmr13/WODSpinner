@@ -58,6 +58,7 @@ export default {
       if (path === '/auth/google/callback') return handleGoogleCallback(request, env, url);
       if (path === '/auth/logout' && request.method === 'POST') return handleLogout(request, env);
       if (path === '/api/me') return handleMe(request, env);
+      if (path === '/api/me/nickname' && request.method === 'PUT') return handleUpdateNickname(request, env);
       if (path === '/api/favourites' && request.method === 'GET') return handleListFavourites(request, env);
       if (path === '/api/favourites' && request.method === 'POST') return handleAddFavourite(request, env);
       if (path.startsWith('/api/favourites/') && request.method === 'DELETE') {
@@ -232,6 +233,16 @@ async function handleMe(request, env) {
   const user = await getSessionUser(request, env);
   if (!user) return json({ loggedIn: false });
   return json({ loggedIn: true, user });
+}
+
+async function handleUpdateNickname(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ error: 'Not logged in' }, 401);
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'Invalid JSON body' }, 400); }
+  const trimmed = String((body || {}).nickname || '').trim().slice(0, 40);
+  await env.DB.prepare('UPDATE users SET nickname = ? WHERE id = ?').bind(trimmed || null, user.id).run();
+  return json({ ok: true, nickname: trimmed || null });
 }
 
 // ---- favourites ----
