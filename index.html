@@ -438,15 +438,46 @@
   .timer-btn.pause{background:var(--yellow);border-color:var(--yellow);color:#121417;}
   .timer-btn.pause:hover{background:#ffd23f;}
   .timer-btn:disabled{opacity:.35;cursor:not-allowed;}
-  .feedback-prompt-inner{margin-top:18px;padding-top:16px;border-top:1px solid var(--border-soft);width:100%;text-align:center;}
-  .feedback-prompt-label{font-size:13px;color:var(--text-dim);margin-bottom:10px;}
-  .feedback-prompt-btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
-  .feedback-prompt-btns button{
-    font-family:var(--font-body);font-size:13px;font-weight:600;
-    padding:9px 14px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);
-    cursor:pointer;transition:border-color .15s,color .15s;
+
+  /* ---------- Celebration modal ---------- */
+  #celebration-root:empty{display:none;}
+  .celebration-overlay{
+    position:fixed; inset:0; background:rgba(8,9,11,0.85);
+    display:flex; align-items:center; justify-content:center;
+    z-index:1000; padding:20px;
   }
-  .feedback-prompt-btns button:hover{border-color:var(--yellow);color:var(--yellow);}
+  .celebration-card{
+    position:relative; background:var(--panel); border:1px solid var(--border);
+    max-width:520px; width:100%; padding:44px 32px 32px;
+    text-align:center; overflow:hidden;
+  }
+  .celebration-close{
+    position:absolute; top:10px; right:10px;
+    background:none; border:none; color:var(--text-faint);
+    font-size:30px; line-height:1; cursor:pointer; padding:6px 10px; z-index:3;
+  }
+  .celebration-close:hover{color:var(--text);}
+  .celebration-message{
+    font-family:var(--font-head); font-size:25px; font-weight:800; line-height:1.3;
+    margin:6px 0 10px 0; position:relative; z-index:2;
+  }
+  .celebration-meta{color:var(--text-dim); font-size:14px; margin-bottom:28px; position:relative; z-index:2;}
+  .celebration-feedback{position:relative; z-index:2; border-top:1px solid var(--border-soft); padding-top:24px; min-height:36px;}
+  .celebration-feedback-label{font-size:15px; color:var(--text-dim); margin-bottom:14px;}
+  .celebration-feedback-btns{display:flex; gap:10px; justify-content:center; flex-wrap:wrap;}
+  .celebration-feedback-btns button{
+    font-family:var(--font-body); font-size:14px; font-weight:700;
+    padding:13px 20px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);
+    cursor:pointer; transition:border-color .15s, transform .1s;
+  }
+  .celebration-feedback-btns button:hover{border-color:var(--yellow); transform:translateY(-2px);}
+  .celebration-thanks{font-size:15px; color:var(--green); font-weight:600;}
+  .confetti-layer{position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:1;}
+  .confetti-piece{position:absolute; top:-20px; animation-name:confetti-fall; animation-timing-function:linear; animation-fill-mode:forwards;}
+  @keyframes confetti-fall{
+    0%{ transform:translateY(0) rotate(0deg); opacity:1; }
+    100%{ transform:translateY(520px) rotate(var(--rot,540deg)); opacity:0.85; }
+  }
 
   /* ---------- Spotify ---------- */
   .spotify-panel{
@@ -577,6 +608,7 @@
 <div id="spotify-banner"></div>
 <div id="import-banner"></div>
 <main id="main"></main>
+<div id="celebration-root"></div>
 
 <script>
 /* =========================================================
@@ -1518,7 +1550,7 @@ function initTimer(workout){
     feedbackSubmitted:false,
   };
   renderTimerPanel();
-  renderFeedbackPrompt();
+  closeCelebration(); // a fresh workout shouldn't carry over a modal from a previous one on the same screen
 }
 
 function timerTotalPhases(){ return TIMER ? TIMER.program.phases.length : 0; }
@@ -1575,7 +1607,7 @@ function timerResetTo(phaseIdx){
   TIMER.endTs = null;
   TIMER.warned = new Set();
   renderTimerPanel();
-  renderFeedbackPrompt(); // clears it — resetting means the session isn't "done" anymore
+  closeCelebration(); // resetting means the session isn't "done" anymore
 }
 function timerReset(){ timerResetTo(0); }
 
@@ -1610,7 +1642,7 @@ function timerTick(){
       TIMER.remaining = 0;
       updateTimerDisplay();
       updateTimerButtons();
-      renderFeedbackPrompt();
+      showCelebration();
       return;
     }
     TIMER.phaseIndex = nextIdx;
@@ -1663,33 +1695,94 @@ function renderTimerPanel(){
   updateTimerButtons();
 }
 
-// Shown once the timer reaches the end of its last phase — a quick, entirely
-// optional "how did that feel" check that writes straight onto the
-// workout_history row already logged when Start was pressed.
-function renderFeedbackPrompt(){
-  const el = document.getElementById('feedback-prompt');
-  if(!el) return;
-  const isDone = TIMER && !TIMER.running && TIMER.remaining===0 && TIMER.phaseIndex===TIMER.program.phases.length-1;
-  if(!isDone || !ACCOUNT.loggedIn || !TIMER.historyId || TIMER.feedbackSubmitted){
-    el.innerHTML = '';
-    return;
+// 20 cheeky/witty completion messages — one is picked at random each time
+// the celebration modal shows, so it doesn't say the exact same thing twice
+// in a row for a group training together regularly.
+const CONGRATS_MESSAGES = [
+  "Well, that happened. Go drink some water, champion.",
+  "You just out-worked your excuses. Nice.",
+  "Somewhere, a burpee is filing a complaint about you.",
+  "Legs: optional for the next 24 hours.",
+  "You survived. Barely. But you survived.",
+  "That's what we in the business call \u201ccrushing it.\u201d",
+  "New personal record for sweat production, probably.",
+  "Your couch has never felt so earned.",
+  "Certified unit of work completed. You're welcome, body.",
+  "That was either very impressive or very concerning. We'll say impressive.",
+  "You just made your past self proud and your future self sore.",
+  "Achievement unlocked: Not Quitting.",
+  "The workout is over. The regret in your legs is just beginning.",
+  "You didn't die. 10/10, would recommend.",
+  "Somewhere a kettlebell is telling its friends about you.",
+  "That's a wrap. Try not to fall over.",
+  "You brought the pain and somehow lived to tell the tale.",
+  "Gold star. Also, please sit down.",
+  "Consider today's cardio quota extremely met.",
+  "You just did the thing. The hard thing. Nice work.",
+];
+
+// Builds a one-off burst of randomised falling confetti pieces as raw HTML —
+// pure CSS animation, no JS timers needed to drive it, so it costs nothing
+// once rendered and needs no cleanup beyond clearing the container.
+function buildConfettiHtml(){
+  const colors = ['#f5c518','#4caf7d','#e0483e','#f0913a','#ffffff'];
+  let html = '';
+  for(let i=0;i<70;i++){
+    const left = (Math.random()*100).toFixed(1);
+    const delay = (Math.random()*0.4).toFixed(2);
+    const duration = (1.8 + Math.random()*1.2).toFixed(2);
+    const color = colors[Math.floor(Math.random()*colors.length)];
+    const rot = Math.round(360 + Math.random()*540);
+    const w = (6 + Math.random()*6).toFixed(0);
+    const h = (w*1.6).toFixed(0);
+    html += `<div class="confetti-piece" style="left:${left}%;background:${color};width:${w}px;height:${h}px;animation-delay:${delay}s;animation-duration:${duration}s;--rot:${rot}deg;"></div>`;
   }
-  el.innerHTML = `
-    <div class="feedback-prompt-inner">
-      <div class="feedback-prompt-label">How did that feel?</div>
-      <div class="feedback-prompt-btns">
-        <button onclick="submitWorkoutFeedback('easy')">Too easy</button>
-        <button onclick="submitWorkoutFeedback('right')">Just right</button>
-        <button onclick="submitWorkoutFeedback('hard')">Too hard</button>
+  return html;
+}
+
+// The feedback area is rebuilt independently of the rest of the modal so
+// selecting a rating can swap it for a thank-you without touching the
+// confetti/message above it.
+function celebrationFeedbackHtml(){
+  if(!ACCOUNT.loggedIn || !TIMER || !TIMER.historyId) return ''; // nothing to attach feedback to — celebration still shows regardless
+  if(TIMER.feedbackSubmitted) return `<div class="celebration-thanks">Thanks \u2014 noted!</div>`;
+  return `
+    <div class="celebration-feedback-label">How did that feel?</div>
+    <div class="celebration-feedback-btns">
+      <button onclick="submitWorkoutFeedback('easy')">Too easy</button>
+      <button onclick="submitWorkoutFeedback('right')">Just right</button>
+      <button onclick="submitWorkoutFeedback('hard')">Too hard</button>
+    </div>`;
+}
+
+function showCelebration(){
+  const root = document.getElementById('celebration-root');
+  if(!root || !APP.selected) return;
+  const w = APP.selected;
+  const msg = CONGRATS_MESSAGES[Math.floor(Math.random()*CONGRATS_MESSAGES.length)];
+  root.innerHTML = `
+    <div class="celebration-overlay" onclick="if(event.target===this) closeCelebration()">
+      <div class="celebration-card">
+        <button class="celebration-close" onclick="closeCelebration()">&times;</button>
+        <div class="confetti-layer">${buildConfettiHtml()}</div>
+        <div class="celebration-message">${msg}</div>
+        <div class="celebration-meta">${FORMATS[w.format].name} \u00b7 ${w.duration} min \u00b7 ${w.groupSize} ${w.groupSize===1?'person':'people'}</div>
+        <div class="celebration-feedback" id="celebration-feedback-area">${celebrationFeedbackHtml()}</div>
       </div>
     </div>`;
+}
+
+function closeCelebration(){
+  const root = document.getElementById('celebration-root');
+  if(root) root.innerHTML = '';
 }
 
 async function submitWorkoutFeedback(rating){
   if(!TIMER || !TIMER.historyId) return;
   const timerRef = TIMER;
-  timerRef.feedbackSubmitted = true; // optimistic — don't make them wait on a network round trip to see it go away
-  renderFeedbackPrompt();
+  timerRef.feedbackSubmitted = true; // optimistic — don't make them wait on a network round trip to see it change
+  const area = document.getElementById('celebration-feedback-area');
+  if(area) area.innerHTML = celebrationFeedbackHtml();
   try{
     await fetch('/api/history/'+timerRef.historyId+'/feedback', {
       method:'PUT', headers:{'Content-Type':'application/json'},
@@ -2351,7 +2444,6 @@ function renderFull(){
                 <button class="timer-btn pause" id="timer-pause-btn" onclick="timerPause()">Pause</button>
                 <button class="timer-btn" onclick="timerReset()">Reset</button>
               </div>
-              <div id="feedback-prompt"></div>
             </div>
             <div class="spotify-panel" id="spotify-panel"></div>
           </div>
