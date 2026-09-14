@@ -78,6 +78,10 @@ export default {
       if (path === '/api/my/favourite-exercises' && request.method === 'PUT') return handleToggleFavouriteExercise(request, env);
       if (path === '/api/history' && request.method === 'POST') return handleAddHistory(request, env);
       if (path === '/api/history/recent') return handleRecentHistory(request, env);
+      if (path.startsWith('/api/history/') && path.endsWith('/feedback') && request.method === 'PUT') {
+        return handleSetHistoryFeedback(request, env, path.slice('/api/history/'.length, -'/feedback'.length));
+      }
+      if (path === '/api/admin/feedback-summary' && request.method === 'GET') return handleAdminFeedbackSummary(request, env);
       if (path === '/api/admin/equipment' && request.method === 'GET') return handleAdminListEquipment(request, env);
       if (path === '/api/admin/equipment' && request.method === 'POST') return handleAdminAddEquipment(request, env);
       if (path.startsWith('/api/admin/equipment/') && request.method === 'PUT') {
@@ -314,6 +318,19 @@ async function handleRecentHistory(request, env) {
   return json({ recentExerciseIds: Array.from(ids) });
 }
 
+async function handleSetHistoryFeedback(request, env, id) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ error: 'Not logged in' }, 401);
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'Invalid JSON body' }, 400); }
+  const { feedback } = body || {};
+  if (!['easy', 'right', 'hard'].includes(feedback)) return json({ error: 'Invalid feedback value' }, 400);
+  await env.DB.prepare(
+    'UPDATE workout_history SET feedback = ? WHERE id = ? AND user_id = ?'
+  ).bind(feedback, id, user.id).run();
+  return json({ ok: true });
+}
+
 async function requireAdmin(request, env){
   const user = await getSessionUser(request, env);
   if(!user || !user.is_admin) return null;
@@ -323,6 +340,37 @@ async function requireAdmin(request, env){
 function slugifyServer(name){
   const base = String(name).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
   return base + '_' + Math.random().toString(36).slice(2,6);
+}
+
+// ---- admin: post-workout feedback summary ----
+
+async function handleAdminFeedbackSummary(request, env){
+  const admin = await requireAdmin(request, env);
+  if(!admin) return json({error:'Forbidden'}, 403);
+
+  const { results: overall } = await env.DB.prepare(
+    `SELECT feedback, COUNT(*) as count FROM workout_history
+     WHERE feedback IS NOT NULL GROUP BY feedback`
+  ).all();
+
+  const { results: byFormat } = await env.DB.prepare(
+    `SELECT format, feedback, COUNT(*) as count FROM workout_history
+     WHERE feedback IS NOT NULL GROUP BY format, feedback ORDER BY format`
+  ).all();
+
+  const { results: totalRow } = await env.DB.prepare(
+    'SELECT COUNT(*) as total FROM workout_history'
+  ).all();
+  const { results: ratedRow } = await env.DB.prepare(
+    'SELECT COUNT(*) as rated FROM workout_history WHERE feedback IS NOT NULL'
+  ).all();
+
+  return json({
+    overall,
+    byFormat,
+    totalSessions: totalRow[0] ? totalRow[0].total : 0,
+    ratedSessions: ratedRow[0] ? ratedRow[0].rated : 0,
+  });
 }
 
 // ---- admin: user tier management (TFO/Premium) ----
