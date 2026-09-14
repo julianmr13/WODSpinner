@@ -86,7 +86,7 @@ export default {
       if (path.startsWith('/api/admin/equipment/') && request.method === 'DELETE') {
         return handleAdminDeleteEquipment(request, env, path.slice('/api/admin/equipment/'.length));
       }
-            if (path === '/api/admin/exercises' && request.method === 'GET') return handleAdminListExercises(request, env);
+      if (path === '/api/admin/exercises' && request.method === 'GET') return handleAdminListExercises(request, env);
       if (path === '/api/admin/users' && request.method === 'GET') return handleAdminListUsers(request, env);
       if (path.startsWith('/api/admin/users/') && path.endsWith('/tier') && request.method === 'PUT') {
         return handleAdminSetUserTier(request, env, path.slice('/api/admin/users/'.length, -'/tier'.length));
@@ -120,6 +120,7 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
+
 // ---- Google OAuth (standard Authorization Code flow — safe to use the
 // client secret here since this all runs server-side, never in the browser) ----
 
@@ -194,6 +195,8 @@ async function handleGoogleCallback(request, env, url) {
       nickname: null, avatar_url: profile.picture || null, is_admin: 0, tier: 'free',
     };
   } else {
+    // refresh the avatar on every login in case they've changed their Google
+    // profile picture since — cheap to keep in sync, no reason to let it go stale
     if (profile.picture && profile.picture !== user.avatar_url) {
       await env.DB.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(profile.picture, user.id).run();
       user.avatar_url = profile.picture;
@@ -201,7 +204,7 @@ async function handleGoogleCallback(request, env, url) {
   }
 
   const sessionId = generateId(32);
-  const expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000;
+  const expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000; // 90 days
   await env.DB.prepare(
     'INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
   ).bind(sessionId, user.id, Date.now(), expiresAt).run();
@@ -226,6 +229,7 @@ async function handleMe(request, env) {
   if (!user) return json({ loggedIn: false });
   return json({ loggedIn: true, user });
 }
+
 // ---- favourites ----
 
 async function handleListFavourites(request, env) {
@@ -282,6 +286,8 @@ async function handleAddHistory(request, env) {
     'INSERT INTO workout_history (id, user_id, group_size, format, tier_label, workout_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).bind(id, user.id, groupSize, format, tierLabel || null, JSON.stringify(workout), now).run();
 
+  // opportunistic prune: delete this user's history older than a year,
+  // right here rather than needing a separate scheduled cron job
   const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
   await env.DB.prepare(
     'DELETE FROM workout_history WHERE user_id = ? AND created_at < ?'
@@ -342,6 +348,7 @@ async function handleAdminSetUserTier(request, env, id){
   ).bind(tier, admin.id, id).run();
   return json({ ok:true });
 }
+
 // ---- admin: review queue for user-submitted custom equipment/exercises ----
 
 async function handleAdminListPendingEquipment(request, env){
@@ -401,8 +408,8 @@ async function handleAdminPromoteExercise(request, env, id){
   if(!row) return json({error:'Not found'}, 404);
   const masterId = slugifyServer(row.name);
   await env.DB.prepare(
-    'INSERT INTO master_exercises (id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
-  ).bind(masterId, row.name, row.pattern, row.equip_json, row.unit, row.base, row.intensity, row.cue||'', Date.now()).run();
+    'INSERT INTO master_exercises (id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, unilateral, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)'
+  ).bind(masterId, row.name, row.pattern, row.equip_json, row.unit, row.base, row.intensity, row.cue||'', row.unilateral||0, Date.now()).run();
   await env.DB.prepare('UPDATE user_exercises SET promoted_master_id = ? WHERE id = ?').bind(masterId, id).run();
   return json({ ok:true, masterId });
 }
@@ -413,6 +420,7 @@ async function handleAdminDismissExercise(request, env, id){
   await env.DB.prepare('UPDATE user_exercises SET dismissed = 1 WHERE id = ?').bind(id).run();
   return json({ ok:true });
 }
+
 // ---- admin: master equipment management ----
 
 async function handleAdminListEquipment(request, env){
@@ -453,6 +461,8 @@ async function handleAdminDeleteEquipment(request, env, id){
   const admin = await requireAdmin(request, env);
   if(!admin) return json({error:'Forbidden'}, 403);
   try {
+    // clean up anything still referencing this equipment id first, otherwise
+    // SQLite's foreign key constraints silently block the delete below
     await env.DB.prepare('UPDATE user_equipment_custom SET promoted_master_id = NULL WHERE promoted_master_id = ?').bind(id).run();
     await env.DB.prepare('DELETE FROM user_equipment_off WHERE equipment_id = ?').bind(id).run();
     await env.DB.prepare('DELETE FROM master_equipment WHERE id=?').bind(id).run();
@@ -468,7 +478,7 @@ async function handleAdminListExercises(request, env){
   const admin = await requireAdmin(request, env);
   if(!admin) return json({error:'Forbidden'}, 403);
   const { results } = await env.DB.prepare(
-    'SELECT id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, created_at FROM master_exercises ORDER BY name'
+    'SELECT id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, unilateral, created_at FROM master_exercises ORDER BY name'
   ).all();
   const exercises = results.map(r => ({ ...r, equip: JSON.parse(r.equip_json) }));
   return json({ exercises });
@@ -479,11 +489,11 @@ async function handleAdminAddExercise(request, env){
   if(!admin) return json({error:'Forbidden'}, 403);
   let body;
   try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
-  const { id, name, pattern, equip, unit, base, intensity, cue, isTrigger } = body || {};
+  const { id, name, pattern, equip, unit, base, intensity, cue, isTrigger, unilateral } = body || {};
   if(!id || !name || !pattern || !equip || !unit) return json({error:'Missing required fields'}, 400);
   await env.DB.prepare(
-    'INSERT INTO master_exercises (id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, name, pattern, JSON.stringify(equip), unit, base||10, intensity||2, cue||'', isTrigger?1:0, Date.now()).run();
+    'INSERT INTO master_exercises (id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, unilateral, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, name, pattern, JSON.stringify(equip), unit, base||10, intensity||2, cue||'', isTrigger?1:0, unilateral?1:0, Date.now()).run();
   return json({ ok:true }, 201);
 }
 
@@ -492,10 +502,10 @@ async function handleAdminUpdateExercise(request, env, id){
   if(!admin) return json({error:'Forbidden'}, 403);
   let body;
   try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
-  const { name, pattern, equip, unit, base, intensity, cue, isTrigger } = body || {};
+  const { name, pattern, equip, unit, base, intensity, cue, isTrigger, unilateral } = body || {};
   await env.DB.prepare(
-    'UPDATE master_exercises SET name=?, pattern=?, equip_json=?, unit=?, base=?, intensity=?, cue=?, is_trigger=? WHERE id=?'
-  ).bind(name, pattern, JSON.stringify(equip||[]), unit, base||10, intensity||2, cue||'', isTrigger?1:0, id).run();
+    'UPDATE master_exercises SET name=?, pattern=?, equip_json=?, unit=?, base=?, intensity=?, cue=?, is_trigger=?, unilateral=? WHERE id=?'
+  ).bind(name, pattern, JSON.stringify(equip||[]), unit, base||10, intensity||2, cue||'', isTrigger?1:0, unilateral?1:0, id).run();
   return json({ ok:true });
 }
 
@@ -522,7 +532,7 @@ async function handleGymData(request, env){
     'SELECT id, name, rotation_only FROM master_equipment ORDER BY name'
   ).all();
   const { results: masterEx } = await env.DB.prepare(
-    'SELECT id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger FROM master_exercises ORDER BY name'
+    'SELECT id, name, pattern, equip_json, unit, base, intensity, cue, is_trigger, unilateral FROM master_exercises ORDER BY name'
   ).all();
 
   if(!user){
@@ -531,7 +541,7 @@ async function handleGymData(request, env){
       equipment: masterEquip.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:false, off:false })),
       exercises: masterEx.map(e=>({
         id:e.id, name:e.name, pattern:e.pattern, equip:JSON.parse(e.equip_json),
-        unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:!!e.is_trigger, personal:false, hidden:false,
+        unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:!!e.is_trigger, unilateral:!!e.unilateral, personal:false, hidden:false,
       })),
       favouriteExerciseIds: [],
     });
@@ -541,13 +551,16 @@ async function handleGymData(request, env){
     env.DB.prepare('SELECT equipment_id FROM user_equipment_off WHERE user_id = ?').bind(user.id).all(),
     env.DB.prepare('SELECT id, name, rotation_only FROM user_equipment_custom WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
     env.DB.prepare('SELECT exercise_id FROM user_hidden_exercises WHERE user_id = ?').bind(user.id).all(),
-    env.DB.prepare('SELECT id, name, pattern, equip_json, unit, base, intensity, cue FROM user_exercises WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
+    env.DB.prepare('SELECT id, name, pattern, equip_json, unit, base, intensity, cue, unilateral FROM user_exercises WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
     env.DB.prepare('SELECT exercise_id FROM user_favourite_exercises WHERE user_id = ?').bind(user.id).all(),
   ]);
 
   const offIds = new Set(offRows.results.map(r=>r.equipment_id));
   const hiddenIds = new Set(hiddenRows.results.map(r=>r.exercise_id));
 
+  // Always return every master item, tagged with whether it's off/hidden for
+  // this user — filtering it out of the response entirely (rather than just
+  // flagging it) would mean Settings could never show it again to undo.
   const equipment = [
     ...masterEquip.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:false, off:offIds.has(e.id) })),
     ...customEquipRows.results.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:true, off:false })),
@@ -555,11 +568,11 @@ async function handleGymData(request, env){
   const exercises = [
     ...masterEx.map(e=>({
       id:e.id, name:e.name, pattern:e.pattern, equip:JSON.parse(e.equip_json),
-      unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:!!e.is_trigger, personal:false, hidden:hiddenIds.has(e.id),
+      unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:!!e.is_trigger, unilateral:!!e.unilateral, personal:false, hidden:hiddenIds.has(e.id),
     })),
     ...customExRows.results.map(e=>({
       id:e.id, name:e.name, pattern:e.pattern, equip:JSON.parse(e.equip_json),
-      unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:false, personal:true, hidden:false,
+      unit:e.unit, base:e.base, intensity:e.intensity, cue:e.cue, trigger:false, unilateral:!!e.unilateral, personal:true, hidden:false,
     })),
   ];
 
@@ -570,6 +583,7 @@ async function handleGymData(request, env){
     favouriteExerciseIds: favRows.results.map(r=>r.exercise_id),
   });
 }
+
 // ---- personal equipment ----
 
 async function handleToggleEquipmentOff(request, env){
@@ -630,12 +644,12 @@ async function handleAddMyExercise(request, env){
   if(!user) return json({error:'Not logged in'}, 401);
   let body;
   try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
-  const { name, pattern, equip, unit, base, intensity, cue } = body || {};
+  const { name, pattern, equip, unit, base, intensity, cue, unilateral } = body || {};
   if(!name || !pattern || !equip || !unit) return json({error:'Missing required fields'}, 400);
   const id = generateId(12);
   await env.DB.prepare(
-    'INSERT INTO user_exercises (id, user_id, name, pattern, equip_json, unit, base, intensity, cue, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, user.id, name, pattern, JSON.stringify(equip), unit, base||10, intensity||2, cue||'', Date.now()).run();
+    'INSERT INTO user_exercises (id, user_id, name, pattern, equip_json, unit, base, intensity, cue, unilateral, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, user.id, name, pattern, JSON.stringify(equip), unit, base||10, intensity||2, cue||'', unilateral?1:0, Date.now()).run();
   return json({ id }, 201);
 }
 
