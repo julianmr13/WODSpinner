@@ -438,6 +438,15 @@
   .timer-btn.pause{background:var(--yellow);border-color:var(--yellow);color:#121417;}
   .timer-btn.pause:hover{background:#ffd23f;}
   .timer-btn:disabled{opacity:.35;cursor:not-allowed;}
+  .feedback-prompt-inner{margin-top:18px;padding-top:16px;border-top:1px solid var(--border-soft);width:100%;text-align:center;}
+  .feedback-prompt-label{font-size:13px;color:var(--text-dim);margin-bottom:10px;}
+  .feedback-prompt-btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
+  .feedback-prompt-btns button{
+    font-family:var(--font-body);font-size:13px;font-weight:600;
+    padding:9px 14px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);
+    cursor:pointer;transition:border-color .15s,color .15s;
+  }
+  .feedback-prompt-btns button:hover{border-color:var(--yellow);color:var(--yellow);}
 
   /* ---------- Spotify ---------- */
   .spotify-panel{
@@ -1505,8 +1514,11 @@ function initTimer(workout){
     warned:new Set(),
     tickHandle:null,
     historyLogged:false, // only log to history once per session, on the FIRST Start press — not on every resume after Pause
+    historyId:null,      // the workout_history row id, filled in once the Start-triggered log call resolves
+    feedbackSubmitted:false,
   };
   renderTimerPanel();
+  renderFeedbackPrompt();
 }
 
 function timerTotalPhases(){ return TIMER ? TIMER.program.phases.length : 0; }
@@ -1515,10 +1527,10 @@ function timerTotalPhases(){ return TIMER ? TIMER.program.phases.length : 0; }
 // the workout was freshly generated or loaded from Favourites, since Start
 // is the one moment that actually means "we did this," not just "we looked at it"
 async function logWorkoutHistory(workout){
-  if(!ACCOUNT.loggedIn || !workout) return;
+  if(!ACCOUNT.loggedIn || !workout) return null;
   const displayTier = (workout.displayTier!==undefined) ? workout.displayTier : workout.tierIdx;
   try{
-    await fetch('/api/history', {
+    const resp = await fetch('/api/history', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -1528,7 +1540,9 @@ async function logWorkoutHistory(workout){
         workout: workout,
       }),
     });
-  }catch(e){ /* history logging is best-effort — never block the workout on it */ }
+    const data = await resp.json();
+    return data.id || null;
+  }catch(e){ return null; /* history logging is best-effort — never block the workout on it */ }
 }
 
 function timerStart(){
@@ -1537,7 +1551,8 @@ function timerStart(){
   if(TIMER.running) return;
   if(!TIMER.historyLogged){
     TIMER.historyLogged = true;
-    logWorkoutHistory(APP.selected);
+    const timerRef = TIMER; // capture in case a different timer replaces the module-level TIMER before this resolves
+    logWorkoutHistory(APP.selected).then(id=>{ if(id) timerRef.historyId = id; });
   }
   TIMER.running = true;
   TIMER.endTs = Date.now() + TIMER.remaining*1000;
@@ -1560,6 +1575,7 @@ function timerResetTo(phaseIdx){
   TIMER.endTs = null;
   TIMER.warned = new Set();
   renderTimerPanel();
+  renderFeedbackPrompt(); // clears it — resetting means the session isn't "done" anymore
 }
 function timerReset(){ timerResetTo(0); }
 
@@ -1594,6 +1610,7 @@ function timerTick(){
       TIMER.remaining = 0;
       updateTimerDisplay();
       updateTimerButtons();
+      renderFeedbackPrompt();
       return;
     }
     TIMER.phaseIndex = nextIdx;
@@ -1644,6 +1661,41 @@ function updateTimerButtons(){
 function renderTimerPanel(){
   updateTimerDisplay();
   updateTimerButtons();
+}
+
+// Shown once the timer reaches the end of its last phase — a quick, entirely
+// optional "how did that feel" check that writes straight onto the
+// workout_history row already logged when Start was pressed.
+function renderFeedbackPrompt(){
+  const el = document.getElementById('feedback-prompt');
+  if(!el) return;
+  const isDone = TIMER && !TIMER.running && TIMER.remaining===0 && TIMER.phaseIndex===TIMER.program.phases.length-1;
+  if(!isDone || !ACCOUNT.loggedIn || !TIMER.historyId || TIMER.feedbackSubmitted){
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = `
+    <div class="feedback-prompt-inner">
+      <div class="feedback-prompt-label">How did that feel?</div>
+      <div class="feedback-prompt-btns">
+        <button onclick="submitWorkoutFeedback('easy')">Too easy</button>
+        <button onclick="submitWorkoutFeedback('right')">Just right</button>
+        <button onclick="submitWorkoutFeedback('hard')">Too hard</button>
+      </div>
+    </div>`;
+}
+
+async function submitWorkoutFeedback(rating){
+  if(!TIMER || !TIMER.historyId) return;
+  const timerRef = TIMER;
+  timerRef.feedbackSubmitted = true; // optimistic — don't make them wait on a network round trip to see it go away
+  renderFeedbackPrompt();
+  try{
+    await fetch('/api/history/'+timerRef.historyId+'/feedback', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ feedback: rating }),
+    });
+  }catch(e){ /* best-effort, same as history logging itself */ }
 }
 
 /* =========================================================
@@ -2299,6 +2351,7 @@ function renderFull(){
                 <button class="timer-btn pause" id="timer-pause-btn" onclick="timerPause()">Pause</button>
                 <button class="timer-btn" onclick="timerReset()">Reset</button>
               </div>
+              <div id="feedback-prompt"></div>
             </div>
             <div class="spotify-panel" id="spotify-panel"></div>
           </div>
@@ -2502,7 +2555,7 @@ async function addMyExercise(){
 }
 
 /* ---------- Admin: master equipment/exercise management ---------- */
-let ADMIN = { loaded:false, loading:false, equipment:[], exercises:[], pendingEquipment:[], pendingExercises:[], users:[], editingEquipmentId:null, editingExerciseId:null };
+let ADMIN = { loaded:false, loading:false, equipment:[], exercises:[], pendingEquipment:[], pendingExercises:[], users:[], feedback:null, editingEquipmentId:null, editingExerciseId:null };
 
 function slugify(name){
   return name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') + '_' + Math.random().toString(36).slice(2,6);
@@ -2511,23 +2564,26 @@ function slugify(name){
 async function loadAdminData(){
   ADMIN.loading = true;
   try{
-    const [eqResp, exResp, pendingEqResp, pendingExResp, usersResp] = await Promise.all([
+    const [eqResp, exResp, pendingEqResp, pendingExResp, usersResp, feedbackResp] = await Promise.all([
       fetch('/api/admin/equipment'),
       fetch('/api/admin/exercises'),
       fetch('/api/admin/review/equipment'),
       fetch('/api/admin/review/exercises'),
       fetch('/api/admin/users'),
+      fetch('/api/admin/feedback-summary'),
     ]);
     const eqData = await eqResp.json();
     const exData = await exResp.json();
     const pendingEqData = await pendingEqResp.json();
     const pendingExData = await pendingExResp.json();
     const usersData = await usersResp.json();
+    const feedbackData = await feedbackResp.json();
     ADMIN.equipment = eqData.equipment || [];
     ADMIN.exercises = exData.exercises || [];
     ADMIN.pendingEquipment = pendingEqData.pending || [];
     ADMIN.pendingExercises = pendingExData.pending || [];
     ADMIN.users = usersData.users || [];
+    ADMIN.feedback = feedbackData;
     ADMIN.loaded = true;
   }catch(e){
     ADMIN.equipment = [];
@@ -2535,6 +2591,7 @@ async function loadAdminData(){
     ADMIN.pendingEquipment = [];
     ADMIN.pendingExercises = [];
     ADMIN.users = [];
+    ADMIN.feedback = null;
   }
   ADMIN.loading = false;
   renderAdmin();
@@ -2649,6 +2706,48 @@ function renderAdmin(){
       </td>
     </tr>`).join('');
 
+  const FEEDBACK_LABELS = { easy:'Too easy', right:'Just right', hard:'Too hard' };
+  let feedbackSection;
+  if(ADMIN.feedback && ADMIN.feedback.ratedSessions > 0){
+    const overallRows = ADMIN.feedback.overall.map(f=>{
+      const pct = Math.round((f.count/ADMIN.feedback.ratedSessions)*100);
+      return `
+        <div class="pop-row">
+          <div class="pop-row-label">${FEEDBACK_LABELS[f.feedback]||f.feedback}</div>
+          <div class="pop-row-bar-wrap"><div class="pop-row-bar" style="width:${pct}%"></div></div>
+          <div class="pop-row-count">${f.count}</div>
+        </div>`;
+    }).join('');
+
+    const byFormatGrouped = {};
+    ADMIN.feedback.byFormat.forEach(r=>{
+      if(!byFormatGrouped[r.format]) byFormatGrouped[r.format] = {};
+      byFormatGrouped[r.format][r.feedback] = r.count;
+    });
+    const formatRows = Object.keys(byFormatGrouped).map(fmt=>{
+      const counts = byFormatGrouped[fmt];
+      const label = (FORMATS[fmt]&&FORMATS[fmt].name)||fmt;
+      return `<tr><td>${label}</td><td>${counts.easy||0}</td><td>${counts.right||0}</td><td>${counts.hard||0}</td></tr>`;
+    }).join('');
+
+    feedbackSection = `
+      <div class="panel-section">
+        <h3>Post-workout feedback</h3>
+        <p class="empty-state" style="margin-bottom:16px;">${ADMIN.feedback.ratedSessions} of ${ADMIN.feedback.totalSessions} logged sessions rated.</p>
+        ${overallRows}
+        <table class="ex-table" style="margin-top:16px;">
+          <thead><tr><th>Format</th><th>Too easy</th><th>Just right</th><th>Too hard</th></tr></thead>
+          <tbody>${formatRows}</tbody>
+        </table>
+      </div>`;
+  } else {
+    feedbackSection = `
+      <div class="panel-section">
+        <h3>Post-workout feedback</h3>
+        <p class="empty-state">No feedback submitted yet.</p>
+      </div>`;
+  }
+
   $main.innerHTML = `
     <div class="screen">
       <div class="screen-narrow" style="max-width:1000px">
@@ -2682,6 +2781,8 @@ function renderAdmin(){
             <tbody>${userRows}</tbody>
           </table>
         </div>
+
+        ${feedbackSection}
 
         <div class="panel-section">
           <h3>Master equipment</h3>
