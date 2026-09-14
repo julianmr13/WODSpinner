@@ -963,14 +963,15 @@ function scaledAmount(ex, tierIdx){
 }
 function amountLabel(ex, tierIdx){
   const amt = scaledAmount(ex, tierIdx);
-  if(ex.unit==='reps') return amt+' reps';
+  const suffix = ex.unilateral ? ' each side' : '';
+  if(ex.unit==='reps') return amt+' reps'+suffix;
   if(ex.unit==='cal') return amt+' cal';
-  if(ex.unit==='time') return amt+'s';
+  if(ex.unit==='time') return amt+'s'+suffix;
   if(ex.unit==='distance') return amt+'m';
   if(ex.unit==='note') return amt+' reps';
   // Anything else reaching here (e.g. a custom exercise with an unrecognised
   // unit) falls back to a reps-style number rather than going blank.
-  if(!ex.trigger && ex.base>0) return Math.max(4, Math.round(ex.base*(TIER_MULT[tierIdx]||1)/2)*2)+' reps';
+  if(!ex.trigger && ex.base>0) return Math.max(4, Math.round(ex.base*(TIER_MULT[tierIdx]||1)/2)*2)+' reps'+suffix;
   return '';
 }
 
@@ -988,9 +989,10 @@ function wrtTotalAmountLabel(ex, tierIdx, stationCount){
   const REFERENCE_SECONDS = 75;
   const mult = TIER_MULT[tierIdx];
   const raw = (ex.base * mult / REFERENCE_SECONDS) * stationSeconds;
+  const suffix = ex.unilateral ? ' each side' : '';
   if(ex.unit==='cal') return Math.max(10, Math.round(raw/5)*5)+' cal';
-  if(ex.unit==='time') return Math.max(30, Math.round(raw/10)*10)+'s';
-  return Math.max(10, Math.round(raw/5)*5)+' reps';
+  if(ex.unit==='time') return Math.max(30, Math.round(raw/10)*10)+'s'+suffix;
+  return Math.max(10, Math.round(raw/5)*5)+' reps'+suffix;
 }
 
 // ---- circuit timing: one shared, deterministic source of truth ----
@@ -1228,7 +1230,7 @@ function generateWorkout(format, groupSize, tierIdx){
     // own row so it shows up alongside the work stations
     workout.exercises.push({
       id: trig.id, name: trig.name, pattern: trig.pattern, unit: trig.unit,
-      cue: trig.cue || '', intensity: trig.intensity||2, amountLabel: 'Trigger \u2014 every rotation', isTrigger: true
+      cue: trig.cue || '', intensity: trig.intensity||2, amountLabel: 'Every rotation', isTrigger: true
     });
     // teams of 4 get a fourth concurrent role — work / core / rest / trigger —
     // not just work / rest / trigger. Add a dedicated core-role exercise,
@@ -1242,7 +1244,7 @@ function generateWorkout(format, groupSize, tierIdx){
       workout.exercises.push({
         id: coreEx.id, name: coreEx.name, pattern: coreEx.pattern, unit: coreEx.unit,
         cue: coreEx.cue || '', intensity: coreEx.intensity||2,
-        amountLabel: coreEx.unit==='time' ? 'Core role \u2014 continuous' : 'Core role \u2014 every rotation',
+        amountLabel: coreEx.unit==='time' ? 'Continuous' : 'Every rotation',
         isCoreRole: true
       });
     }
@@ -2321,7 +2323,7 @@ function renderSettings(){
       <td>${ex.name}${ex.personal?' <span class="tag-pill">yours</span>':''}</td>
       <td><span class="tag-pill">${ex.pattern}</span></td>
       <td>${ex.equip.map(e=>`<span class="tag-pill">${e}</span>`).join(' ')}</td>
-      <td>${ex.trigger?'<span class="tag-pill">trigger</span>':''}</td>
+      <td>${ex.trigger?'<span class="tag-pill">trigger</span>':''}${ex.unilateral?' <span class="tag-pill">each side</span>':''}</td>
       <td><button class="fav-star ${GYM_DATA.favouriteExerciseIds.includes(ex.id)?'active':''}" onclick="toggleMyFavouriteExercise('${ex.id}')">&#9733;</button></td>
       <td><button class="del-btn" onclick="${removeAction}">${removeLabel}</button></td>
     </tr>`;
@@ -2367,6 +2369,9 @@ function renderSettings(){
               <option value="time">time (s)</option>
             </select>
             <input id="new-ex-base" type="number" placeholder="base amount" value="10" style="width:110px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);">
+              <input type="checkbox" id="new-ex-unilateral"> Single-sided (reps counted per side)
+            </label>
             <button class="btn btn-primary" onclick="addMyExercise()">Add exercise</button>
           </div>
         </div>
@@ -2439,13 +2444,14 @@ async function addMyExercise(){
   const pattern = document.getElementById('new-ex-pattern').value;
   const unit = document.getElementById('new-ex-unit').value;
   const base = parseFloat(document.getElementById('new-ex-base').value)||10;
+  const unilateral = document.getElementById('new-ex-unilateral').checked;
   const equipSel = document.getElementById('new-ex-equip');
   const equip = Array.from(equipSel.selectedOptions).map(o=>o.value);
   if(!name || equip.length===0){ alert('Give it a name and at least one equipment tag.'); return; }
   try{
     await fetch('/api/my/exercises', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name, pattern, equip, unit, base }),
+      body: JSON.stringify({ name, pattern, equip, unit, base, unilateral }),
     });
   }catch(e){ alert('Something went wrong adding that.'); }
   await loadGymData();
@@ -2550,7 +2556,7 @@ function renderAdmin(){
       <td><span class="tag-pill">${ex.pattern}</span></td>
       <td>${ex.equip.map(e=>`<span class="tag-pill">${e}</span>`).join(' ')}</td>
       <td>${ex.unit}</td>
-      <td>${ex.is_trigger ? '<span class="tag-pill">trigger</span>' : ''}</td>
+      <td>${ex.is_trigger ? '<span class="tag-pill">trigger</span>' : ''}${ex.unilateral ? ' <span class="tag-pill">each side</span>' : ''}</td>
       <td>
         <button class="del-btn" onclick="adminEditExercise('${ex.id}')">Edit</button>
         <button class="del-btn" onclick="adminDeleteExercise('${ex.id}')">Delete</button>
@@ -2677,6 +2683,9 @@ function renderAdmin(){
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);">
               <input type="checkbox" id="admin-ex-trigger" ${editingEx&&editingEx.is_trigger?'checked':''}> Trigger exercise (WRT only)
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);">
+              <input type="checkbox" id="admin-ex-unilateral" ${editingEx&&editingEx.unilateral?'checked':''}> Single-sided (reps counted per side)
+            </label>
             <button class="btn btn-primary" onclick="adminSaveExercise()">${ADMIN.editingExerciseId?'Save changes':'Add exercise'}</button>
             ${ADMIN.editingExerciseId?'<button class="btn btn-ghost" onclick="adminCancelEditExercise()">Cancel</button>':''}
           </div>
@@ -2726,6 +2735,7 @@ async function adminSaveExercise(){
   const intensity = parseInt(document.getElementById('admin-ex-intensity').value,10)||2;
   const cue = document.getElementById('admin-ex-cue').value.trim();
   const isTrigger = document.getElementById('admin-ex-trigger').checked;
+  const unilateral = document.getElementById('admin-ex-unilateral').checked;
   const equipSel = document.getElementById('admin-ex-equip');
   const equip = Array.from(equipSel.selectedOptions).map(o=>o.value);
   if(!name || equip.length===0){ alert('Give it a name and at least one equipment tag.'); return; }
@@ -2733,13 +2743,13 @@ async function adminSaveExercise(){
     if(ADMIN.editingExerciseId){
       await fetch('/api/admin/exercises/'+ADMIN.editingExerciseId, {
         method:'PUT', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ name, pattern, equip, unit, base, intensity, cue, isTrigger }),
+        body: JSON.stringify({ name, pattern, equip, unit, base, intensity, cue, isTrigger, unilateral }),
       });
     } else {
       const id = slugify(name);
       await fetch('/api/admin/exercises', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ id, name, pattern, equip, unit, base, intensity, cue, isTrigger }),
+        body: JSON.stringify({ id, name, pattern, equip, unit, base, intensity, cue, isTrigger, unilateral }),
       });
     }
   }catch(e){ alert('Something went wrong saving that.'); }
