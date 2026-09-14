@@ -890,7 +890,12 @@ function pickExercisesForSession(format, groupSize, tierIdx, count){
   const rotationOk = format==='circuit' || format==='wrt' || groupSize<=2;
   const pool = rotationOk ? usable : usable.filter(ex=>!exerciseIsRotationOnly(ex));
   const triggerPool = usable.filter(ex=>ex.trigger);
-  const mainPool = pool.filter(ex=>!ex.trigger || format==='wrt');
+  // Trigger-flagged exercises (runs, sled pushes/pulls, farmer's carries —
+  // anything that takes someone out of the gym into open space) must never
+  // be a regular work station, in WRT or any other format. If one ended up
+  // as a station too, that person wouldn't be there when the trigger runner
+  // gets back to swap the rotation.
+  const mainPool = pool.filter(ex=>!ex.trigger);
 
   const recentIds = recentlyUsedIds(7);
   const patternCounts = {};
@@ -942,6 +947,12 @@ function scaledAmount(ex, tierIdx){
   if(ex.unit==='reps') return Math.max(4, Math.round(ex.base*mult/2)*2);
   if(ex.unit==='cal') return Math.max(5, Math.round(ex.base*mult));
   if(ex.unit==='time') return Math.max(15, Math.round(ex.base*mult/5)*5);
+  if(ex.unit==='distance') return Math.max(10, Math.round(ex.base*mult/5)*5);
+  // 'note' exercises (e.g. Blue Mat run) represent one fixed-distance lap by
+  // definition — base is 0, there's nothing to scale. When one of these shows
+  // up as a regular WRT work station rather than the designated trigger, the
+  // sensible target is how many times you run it, not a distance figure.
+  if(ex.unit==='note') return Math.max(2, Math.round(3*mult));
   return null;
 }
 function amountLabel(ex, tierIdx){
@@ -949,12 +960,10 @@ function amountLabel(ex, tierIdx){
   if(ex.unit==='reps') return amt+' reps';
   if(ex.unit==='cal') return amt+' cal';
   if(ex.unit==='time') return amt+'s';
-  // 'distance' and 'note' units are only meant for trigger exercises, which
-  // never render through this path (WRT overrides their label, and every
-  // other format filters trigger:true exercises out entirely). If one somehow
-  // ends up here anyway — e.g. a custom exercise added via Settings with an
-  // unrecognised unit — fall back to a reps-style number rather than going
-  // blank with no target at all.
+  if(ex.unit==='distance') return amt+'m';
+  if(ex.unit==='note') return amt+' reps';
+  // Anything else reaching here (e.g. a custom exercise with an unrecognised
+  // unit) falls back to a reps-style number rather than going blank.
   if(!ex.trigger && ex.base>0) return Math.max(4, Math.round(ex.base*(TIER_MULT[tierIdx]||1)/2)*2)+' reps';
   return '';
 }
@@ -1161,15 +1170,12 @@ function generateWorkout(format, groupSize, tierIdx){
     createdAt: Date.now(),
   };
 
-  // Tabata and Circuit already impose a fixed work duration on every exercise
-  // (the block/station timer) — showing a separate scaled time figure on a
-  // time-based exercise (e.g. "Battle rope waves 25s" inside a 20s block) just
-  // conflicts with that. Drop the redundant label; the block/station timing
-  // in the structure line already covers it.
+  // Tabata and Circuit are governed entirely by the block/station timer — you
+  // work the clock, not a rep target, regardless of whether the exercise is
+  // normally reps/cal/time-based. Showing any scaled number here implies a
+  // required target that doesn't actually exist, so drop it for everything.
   if(format==='tabata' || format==='circuit'){
-    workout.exercises = workout.exercises.map(e=>
-      e.unit==='time' ? {...e, amountLabel:''} : e
-    );
+    workout.exercises = workout.exercises.map(e=>({...e, amountLabel:''}));
   }
 
   if(format==='wrt'){
@@ -1183,11 +1189,12 @@ function generateWorkout(format, groupSize, tierIdx){
     workout.numTeams = numTeams;
     workout.trigger = trig.name;
     workout.roundSwap = numTeams>1;
-    // reps convention: flat target reps/cal per station (e.g. "100")
-    const target = [60,80,100,120][tierIdx];
-    workout.exercises = workout.exercises.map(e=>({
-      ...e, amountLabel: e.unit==='cal' ? target+' cal' : (e.unit==='time'? target+'s' : target+' reps')
-    }));
+    // Each work station keeps its normal per-exercise scaled target (the
+    // same amountLabel already computed for every exercise above) — a real
+    // rep/cal/time figure appropriate to that specific exercise, not a flat
+    // number applied uniformly regardless of exercise type. This is what
+    // tells the group roughly when the station will finish, and keeps the
+    // combined workload across all stations sane for the intended timeframe.
     // the trigger exercise runs every rotation but was previously only
     // mentioned in the instructions, never actually listed — add it as its
     // own row so it shows up alongside the work stations
