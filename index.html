@@ -2278,7 +2278,25 @@ let APP = {screen:'landing', groupSize:null, four:[], selected:null};
 
 function goHome(){ clearTimerInterval(); APP.screen='landing'; render(); }
 function showFavourites(){ clearTimerInterval(); APP.screen='favourites'; render(); }
-function showSettings(){ clearTimerInterval(); APP.screen='settings'; render(); }
+let STREAK = { loaded:false, loading:false, currentStreak:0, longestStreak:0, sessionsThisWeek:0, totalSessions:0 };
+function showSettings(){ clearTimerInterval(); APP.screen='settings'; STREAK.loaded=false; render(); }
+
+async function loadStreakData(){
+  STREAK.loading = true;
+  try{
+    const resp = await fetch('/api/me/streak');
+    const data = await resp.json();
+    STREAK.currentStreak = data.currentStreak || 0;
+    STREAK.longestStreak = data.longestStreak || 0;
+    STREAK.sessionsThisWeek = data.sessionsThisWeek || 0;
+    STREAK.totalSessions = data.totalSessions || 0;
+    STREAK.loaded = true;
+  }catch(e){
+    STREAK.currentStreak = 0; STREAK.longestStreak = 0; STREAK.sessionsThisWeek = 0; STREAK.totalSessions = 0;
+  }
+  STREAK.loading = false;
+  render();
+}
 function showAdmin(){ clearTimerInterval(); APP.screen='admin'; ADMIN.loaded=false; render(); }
 function showPopular(){ clearTimerInterval(); APP.screen='popular'; POPULAR.loaded=false; render(); }
 
@@ -2593,6 +2611,16 @@ function renderSettings(){
   const patternOptions = PATTERNS.map(p=>`<option value="${p}">${p}</option>`).join('');
   const equipOptions = GYM_DATA.equipment.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
 
+  if(!STREAK.loaded && !STREAK.loading) loadStreakData();
+  const streakStat = (val, label) => `<div><div style="font-family:var(--font-head);font-size:28px;font-weight:800;">${val}</div><div style="font-size:12px;color:var(--text-dim);">${label}</div></div>`;
+  const streakHtml = STREAK.loaded ? `
+    <div style="display:flex;gap:28px;flex-wrap:wrap;margin-top:20px;padding-top:20px;border-top:1px solid var(--border-soft);">
+      ${streakStat(STREAK.currentStreak, 'week streak')}
+      ${streakStat(STREAK.longestStreak, 'longest streak')}
+      ${streakStat(STREAK.sessionsThisWeek, 'this week')}
+      ${streakStat(STREAK.totalSessions, 'total sessions')}
+    </div>` : `<p class="empty-state" style="margin-top:16px;">Loading&hellip;</p>`;
+
   $main.innerHTML = `
     <div class="screen">
       <div class="screen-narrow" style="max-width:1000px">
@@ -2613,6 +2641,7 @@ function renderSettings(){
               </div>
             </div>
           </div>
+          ${streakHtml}
         </div>
 
         <div class="panel-section">
