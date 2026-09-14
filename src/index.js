@@ -678,13 +678,16 @@ async function handleToggleFavouriteExercise(request, env){
 // ---- popularity (aggregated across everyone, not just the current user) ----
 
 async function handlePopular(request, env) {
+  // Based on actual workout_history (every session someone started), not
+  // just favourites — a far richer signal of real gym usage than the small
+  // subset of workouts someone happened to star.
   const { results: formats } = await env.DB.prepare(
-    'SELECT format, COUNT(*) as count FROM favourites GROUP BY format ORDER BY count DESC LIMIT 10'
+    'SELECT format, COUNT(*) as count FROM workout_history GROUP BY format ORDER BY count DESC LIMIT 10'
   ).all();
 
-  const { results: allFavs } = await env.DB.prepare('SELECT workout_json FROM favourites').all();
+  const { results: allHistory } = await env.DB.prepare('SELECT workout_json FROM workout_history').all();
   const exerciseCounts = {};
-  for (const row of allFavs) {
+  for (const row of allHistory) {
     try {
       const w = JSON.parse(row.workout_json);
       (w.exercises || []).forEach(e => {
@@ -697,6 +700,7 @@ async function handlePopular(request, env) {
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
+  const totalSessions = allHistory.length;
 
-  return json({ popularFormats: formats, popularExercises });
+  return json({ popularFormats: formats, popularExercises, totalSessions });
 }
