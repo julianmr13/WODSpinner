@@ -59,6 +59,7 @@ export default {
       if (path === '/auth/logout' && request.method === 'POST') return handleLogout(request, env);
       if (path === '/api/me') return handleMe(request, env);
       if (path === '/api/me/nickname' && request.method === 'PUT') return handleUpdateNickname(request, env);
+      if (path === '/api/me/streak') return handleMyStreak(request, env);
       if (path === '/api/favourites' && request.method === 'GET') return handleListFavourites(request, env);
       if (path === '/api/favourites' && request.method === 'POST') return handleAddFavourite(request, env);
       if (path.startsWith('/api/favourites/') && request.method === 'DELETE') {
@@ -243,6 +244,53 @@ async function handleUpdateNickname(request, env) {
   const trimmed = String((body || {}).nickname || '').trim().slice(0, 40);
   await env.DB.prepare('UPDATE users SET nickname = ? WHERE id = ?').bind(trimmed || null, user.id).run();
   return json({ ok: true, nickname: trimmed || null });
+}
+
+// A "streak" is consecutive WEEKS with at least one logged session, not
+// consecutive days — training every single day isn't the expectation here,
+// and a day-based streak would reset unfairly on a normal rest day. Weeks
+// are Monday-start, UTC, so this doesn't depend on any user's local timezone.
+function mondayOfWeekUTC(ts){
+  const d = new Date(ts);
+  const day = d.getUTCDay(); // 0=Sun..6=Sat
+  const diffToMonday = (day===0) ? -6 : (1-day);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()+diffToMonday);
+}
+
+async function handleMyStreak(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ error: 'Not logged in' }, 401);
+
+  const { results } = await env.DB.prepare(
+    'SELECT created_at FROM workout_history WHERE user_id = ? ORDER BY created_at ASC'
+  ).bind(user.id).all();
+
+  const WEEK_MS = 7*24*60*60*1000;
+  const weekKeys = Array.from(new Set(results.map(r=>mondayOfWeekUTC(r.created_at)))).sort((a,b)=>a-b);
+
+  let longestStreak = 0, run = 0, prev = null;
+  for (const wk of weekKeys) {
+    run = (prev !== null && wk-prev===WEEK_MS) ? run+1 : 1;
+    if (run>longestStreak) longestStreak = run;
+    prev = wk;
+  }
+
+  let currentStreak = 0;
+  if (weekKeys.length>0) {
+    const thisWeekKey = mondayOfWeekUTC(Date.now());
+    const lastWeekKey = thisWeekKey - WEEK_MS;
+    const mostRecent = weekKeys[weekKeys.length-1];
+    if (mostRecent===thisWeekKey || mostRecent===lastWeekKey) {
+      let idx = weekKeys.length-1, count = 1;
+      while (idx>0 && weekKeys[idx]-weekKeys[idx-1]===WEEK_MS) { count++; idx--; }
+      currentStreak = count;
+    }
+  }
+
+  const thisWeekKeyNow = mondayOfWeekUTC(Date.now());
+  const sessionsThisWeek = results.filter(r=>mondayOfWeekUTC(r.created_at)===thisWeekKeyNow).length;
+
+  return json({ currentStreak, longestStreak, sessionsThisWeek, totalSessions: results.length });
 }
 
 // ---- favourites ----
