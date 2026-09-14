@@ -108,7 +108,13 @@
   .account-menu-wrap{position:relative;}
   .btn-google{background:#fff;color:#3c4043;border-color:#dadce0;font-weight:700;}
   .btn-google:hover{background:#f1f3f4;}
-  .account-pill{background:var(--panel-2);}
+  .account-pill{background:var(--panel-2);display:flex;align-items:center;gap:8px;}
+  .avatar-thumb{width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0;}
+  .avatar-thumb-lg{width:72px;height:72px;border-radius:50%;object-fit:cover;flex-shrink:0;background:var(--panel-2);}
+  .avatar-placeholder{
+    display:flex;align-items:center;justify-content:center;border-radius:50%;
+    background:var(--yellow);color:#121417;font-weight:800;flex-shrink:0;
+  }
   .account-dropdown{
     position:absolute; top:calc(100% + 8px); right:0;
     background:var(--panel); border:1px solid var(--border);
@@ -620,7 +626,7 @@
    DATA MODEL
    ========================================================= */
 
-const ROTATION_ONLY_EQUIP = new Set(['rack','cable','rower','skierg','bike','legpress','trx','ghd','treadmill','elliptical','rope']);
+const ROTATION_ONLY_EQUIP = new Set(['rack','cable','rower','skierg','bike','legpress','trx','ghd','treadmill','elliptical','rope','vest','sandbag']);
 
 const EQUIPMENT = [
   {id:'bw', name:'Bodyweight / open space'},
@@ -1069,17 +1075,30 @@ function circuitRoundsFor(tierIdx, stations){
 }
 // picks the station count (>= groupSize, ideally close to it) that gets the
 // resulting rounds*stations*cycle time closest to the tier's target duration
+// Searching only 3 station counts beyond the minimum was too narrow — for
+// some group sizes there was no good time-fit available in that tiny range,
+// producing up to 8.3% drift from the stated duration. Widening the search
+// fixes that, but taken too far it starts "fixing" a minor drift by adding
+// a pile of entirely unused spare stations (e.g. 11 people on 20 stations),
+// which is worse for an actual gym floor than a couple of minutes' drift.
+// The cost function below balances both: minutes of drift and spare
+// stations are weighted equally, so it won't trade one for an excess of
+// the other.
 function pickCircuitStations(tierIdx, groupSize){
   const baseStations = [4,5,5,6][tierIdx];
   const minStations = Math.max(baseStations, groupSize);
   const {work, rest} = circuitWorkRest(tierIdx);
   const targetSec = TIER_MINUTES[tierIdx]*60;
+  const SEARCH_WIDTH = 12;
+  const SPARE_PENALTY = 1; // 1 percentage point of drift treated as equally costly to 1 empty station
   let best = null;
-  for(let stations=minStations; stations<=minStations+3; stations++){
+  for(let stations=minStations; stations<=minStations+SEARCH_WIDTH; stations++){
     const rounds = circuitRoundsFor(tierIdx, stations);
     const total = rounds*stations*(work+rest) - rest; // minus the final trailing rest, which gets skipped
-    const err = Math.abs(total-targetSec);
-    if(!best || err<best.err) best = {stations, err};
+    const driftPct = Math.abs(total-targetSec)/targetSec*100;
+    const spare = stations - groupSize;
+    const cost = driftPct + spare*SPARE_PENALTY;
+    if(!best || cost<best.cost) best = {stations, cost};
   }
   return best.stations;
 }
@@ -2583,6 +2602,20 @@ function renderSettings(){
         </div>
 
         <div class="panel-section">
+          <h3>Your profile</h3>
+          <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
+            ${avatarHtml(ACCOUNT.user, 'avatar-thumb-lg', 28)}
+            <div style="flex:1;min-width:220px;">
+              <label style="display:block;font-size:13px;color:var(--text-dim);margin-bottom:6px;">Nickname (shown instead of your Google name around the app)</label>
+              <div style="display:flex;gap:8px;">
+                <input id="nickname-input" placeholder="${ACCOUNT.user.display_name||'e.g. Jules'}" value="${ACCOUNT.user.nickname||''}" style="flex:1;">
+                <button class="btn btn-primary" onclick="saveNickname()">Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section">
           <h3>Equipment on hand</h3>
           <div class="equip-grid">${equipRows}</div>
           ${personalEquip.length ? `<h3 style="margin-top:16px;">Your custom equipment</h3><div class="equip-grid">${personalEquipRows}</div>` : ''}
@@ -2630,6 +2663,21 @@ async function toggleMyEquipmentOff(id, off){
   }catch(e){}
   await loadGymData();
   render();
+}
+
+async function saveNickname(){
+  const val = document.getElementById('nickname-input').value.trim();
+  try{
+    const resp = await fetch('/api/me/nickname', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ nickname: val }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){ alert('Save failed: ' + (data.detail || data.error || resp.status)); return; }
+    ACCOUNT.user.nickname = data.nickname || null;
+    renderAccountWidget();
+    render();
+  }catch(e){ alert('Save failed: ' + e.message); }
 }
 
 async function addMyEquipment(){
@@ -3295,6 +3343,14 @@ function closeMenuAnd(fn){
   fn();
 }
 
+function avatarHtml(user, sizeClass, fontSize){
+  if(user && user.avatar_url){
+    return `<img class="${sizeClass}" src="${user.avatar_url}" alt="">`;
+  }
+  const initial = ((user && (user.nickname || user.display_name || user.email)) || '?').trim().charAt(0).toUpperCase();
+  return `<div class="${sizeClass} avatar-placeholder" style="font-size:${fontSize||12}px;">${initial}</div>`;
+}
+
 function renderAccountWidget(){
   const el = document.getElementById('account-widget');
   if(!el) return;
@@ -3307,14 +3363,14 @@ function renderAccountWidget(){
     return;
   }
 
-  const name = (ACCOUNT.user && (ACCOUNT.user.display_name || ACCOUNT.user.email)) || 'Account';
+  const name = (ACCOUNT.user && (ACCOUNT.user.nickname || ACCOUNT.user.display_name || ACCOUNT.user.email)) || 'Account';
   const firstName = name.split(' ')[0];
   el.innerHTML = `
     <div class="account-menu-wrap">
-      <button class="nav-btn account-pill" onclick="toggleAccountMenu(event)">${firstName} &#9662;</button>
+      <button class="nav-btn account-pill" onclick="toggleAccountMenu(event)">${avatarHtml(ACCOUNT.user, 'avatar-thumb')} ${firstName} &#9662;</button>
       ${ACCOUNT.menuOpen ? `
         <div class="account-dropdown" onclick="event.stopPropagation()">
-          <div class="account-dropdown-name">${ACCOUNT.user.display_name || ''}</div>
+          <div class="account-dropdown-name">${name}</div>
           <div class="account-dropdown-email">${ACCOUNT.user.email || ''}</div>
           <div class="account-dropdown-divider"></div>
           <button class="account-dropdown-item" onclick="closeMenuAnd(showFavourites)">Favourites</button>
