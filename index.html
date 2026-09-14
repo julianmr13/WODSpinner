@@ -655,7 +655,7 @@ const DEFAULT_EXERCISES = [
   {id:'bike_cal', name:'Assault bike (calories)', pattern:'cardio', equip:['bike'], unit:'cal', base:15, intensity:2, cue:'Steady cadence, push and pull through the pedals with the arms.'},
   {id:'burpees', name:'Burpees', pattern:'cardio', equip:['bw'], unit:'reps', base:12, intensity:3, cue:'Chest to floor, jump the feet in, full jump up to finish.'},
   {id:'mountain_climbers', name:'Mountain climbers', pattern:'cardio', equip:['bw'], unit:'reps', base:24, intensity:2, cue:'Hips low, drive the knees to the chest, quick and controlled.'},
-  {id:'shuttle_runs', name:'Shuttle runs', pattern:'cardio', equip:['hangar'], unit:'reps', base:8, intensity:2, cue:'Touch the line, low turn, explode back the other way.'},
+  {id:'shuttle_runs', name:'Shuttle runs', pattern:'cardio', equip:['hangar'], unit:'reps', base:4, intensity:2, cue:'Touch the line, low turn, explode back the other way.'},
   {id:'blue_mat_run', name:'Blue Mat run (~100m)', pattern:'cardio', equip:['hangar'], unit:'note', base:0, intensity:2, trigger:true, cue:'Steady pace out, quick turn, push the return.'},
   {id:'h145_run', name:'H145 run (~180m)', pattern:'cardio', equip:['hangar'], unit:'note', base:0, intensity:3, trigger:true, cue:'Settle into a strong pace, controlled turn at the mark.'},
   // POWER
@@ -872,6 +872,11 @@ function recentlyUsedIds(days){
   return ids;
 }
 
+// Empty by default so normal generation everywhere else in the app is
+// completely unaffected — only populated briefly around a Popular-screen
+// generation call (see generateFourFromPopular), then cleared straight after.
+let POPULAR_EXERCISE_NAMES = new Set();
+
 function weightedPick(candidates, recentIds, usedThisWorkout){
   const weighted = [];
   candidates.forEach(ex=>{
@@ -879,6 +884,7 @@ function weightedPick(candidates, recentIds, usedThisWorkout){
     let w = 1;
     if(GYM_DATA.favouriteExerciseIds.includes(ex.id)) w *= 2.2;
     if(recentIds.has(ex.id)) w *= 0.35;
+    if(POPULAR_EXERCISE_NAMES.has(ex.name)) w *= 1.6;
     for(let i=0;i<Math.round(w*10);i++) weighted.push(ex);
   });
   if(weighted.length===0) return null;
@@ -1335,6 +1341,31 @@ function generateFour(groupSize){
   // was used to build the numbers — that preset stays on w.tierIdx untouched,
   // so the timer/structure text (already computed) never gets recalculated
   // against a mismatched tier.
+  picks.forEach((w,i)=>{
+    w.displayTier = i;
+    w.duration = Math.round((w._actualSeconds||w.duration*60)/60);
+  });
+  return picks;
+}
+
+// Same as generateFour, but restricted to a specific set of formats (used by
+// the Popular screen to draw from the top few most-used formats rather than
+// every eligible one). Falls back to the full eligible pool if none of the
+// requested formats actually work for this group size, so it never comes up empty.
+function generateFourFromFormats(groupSize, allowedFormats){
+  const eligible = formatsForGroup(groupSize);
+  let pool = eligible.filter(f=>allowedFormats.includes(f));
+  if(pool.length===0) pool = eligible;
+  const candidates = [];
+  pool.forEach(format=>{
+    for(let presetTier=0; presetTier<4; presetTier++){
+      const w = generateWorkout(format, groupSize, presetTier);
+      w._score = candidateDifficultyScore(w);
+      candidates.push(w);
+    }
+  });
+  candidates.sort((a,b)=>a._score-b._score);
+  const picks = pickSpread(candidates, 4);
   picks.forEach((w,i)=>{
     w.displayTier = i;
     w.duration = Math.round((w._actualSeconds||w.duration*60)/60);
@@ -2135,8 +2166,8 @@ async function reshuffleFour(){
   render();
 }
 
-function renderPicker(){
-  const cards = APP.four.map((w,i)=>{
+function buildWodCardsHtml(four){
+  return four.map((w,i)=>{
     const color = TIER_COLOR[i];
     let cardList = w.exercises;
     if(w.format==='wrt'){
@@ -2166,6 +2197,10 @@ function renderPicker(){
         ${footer?`<div class="wod-card-foot">${footer}</div>`:''}
       </div>`;
   }).join('');
+}
+
+function renderPicker(){
+  const cards = buildWodCardsHtml(APP.four);
 
   $main.innerHTML = `
     <div class="screen">
@@ -2777,7 +2812,41 @@ async function adminDeleteExercise(id){
 }
 
 /* ---------- Popular (gym-wide, based on real session history) ---------- */
-let POPULAR = { loaded:false, loading:false, popularFormats:[], popularExercises:[], totalSessions:0 };
+let POPULAR = { loaded:false, loading:false, popularFormats:[], popularExercises:[], totalSessions:0, groupSize:null, four:null };
+
+// Draws the 4 cards from the top 3 most-used formats (falling back to the
+// full eligible pool if none of those fit this group size), with exercise
+// selection weighted toward the most-used exercises without excluding
+// everything else — a nudge, not a hard restriction.
+async function generateFourFromPopular(groupSize){
+  if(GYM_DATA_READY) await GYM_DATA_READY;
+  const topFormats = POPULAR.popularFormats.slice(0,3).map(f=>f.format);
+  const topExerciseNames = POPULAR.popularExercises.map(e=>e.name);
+  POPULAR_EXERCISE_NAMES = new Set(topExerciseNames);
+  const four = generateFourFromFormats(groupSize, topFormats.length ? topFormats : formatsForGroup(groupSize));
+  POPULAR_EXERCISE_NAMES = new Set(); // clear immediately — never leaks into any other generation call
+  return four;
+}
+
+async function selectPopularGroupSize(n){
+  POPULAR.groupSize = n;
+  POPULAR.four = await generateFourFromPopular(n);
+  APP.groupSize = n;
+  APP.four = POPULAR.four; // so the existing openWorkout(i) mechanism works unmodified
+  render();
+}
+
+async function reshufflePopularFour(){
+  POPULAR.four = await generateFourFromPopular(POPULAR.groupSize);
+  APP.four = POPULAR.four;
+  render();
+}
+
+function changePopularGroupSize(){
+  POPULAR.groupSize = null;
+  POPULAR.four = null;
+  render();
+}
 
 async function loadPopularData(){
   POPULAR.loading = true;
@@ -2841,6 +2910,31 @@ function renderPopular(){
       </div>`;
   }).join('');
 
+  let sizeTiles = '';
+  for(let i=1;i<=12;i++){
+    sizeTiles += `<div class="size-tile" onclick="selectPopularGroupSize(${i})">
+      <div class="num">${i}</div>
+      <div class="label">${i===1?'solo':i<=2?'pair':'people'}</div>
+    </div>`;
+  }
+
+  const generatorSection = POPULAR.four ? `
+    <div class="panel-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="margin:0;">Popular workouts for ${POPULAR.groupSize} ${POPULAR.groupSize===1?'person':'people'}</h3>
+        <button class="btn btn-ghost" onclick="changePopularGroupSize()">Change group size</button>
+      </div>
+      <div class="card-row">${buildWodCardsHtml(POPULAR.four)}</div>
+      <div class="spin-again-wrap">
+        <button class="btn-spin" onclick="reshufflePopularFour()">Spin again!</button>
+      </div>
+    </div>` : `
+    <div class="panel-section">
+      <h3>Generate from the most popular</h3>
+      <p class="page-sub" style="margin-bottom:16px;">Pulls from the top few formats above, with popular exercises weighted in.</p>
+      <div class="size-grid">${sizeTiles}</div>
+    </div>`;
+
   $main.innerHTML = `
     <div class="screen">
       <div class="screen-narrow">
@@ -2859,6 +2953,8 @@ function renderPopular(){
           <h3>Most-used exercises</h3>
           ${exerciseRows}
         </div>
+
+        ${generatorSection}
       </div>
     </div>`;
 }
