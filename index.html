@@ -314,6 +314,9 @@
     flex:1;
     display:flex;
     flex-direction:column;
+    max-width:1700px;
+    width:100%;
+    margin:0 auto;
   }
   .full-head{
     display:flex;
@@ -325,7 +328,7 @@
   }
   .full-head-left .tier-tag{
     font-family:var(--font-mono);
-    font-size:13px;
+    font-size:clamp(13px, 1vw, 16px);
     font-weight:700;
     text-transform:uppercase;
     letter-spacing:.06em;
@@ -333,15 +336,15 @@
   }
   .full-head-left h1{
     font-family:var(--font-head);
-    font-size:42px;
+    font-size:clamp(42px, 3.2vw, 60px);
     margin:4px 0 6px 0;
   }
-  .full-head-left .meta{color:var(--text-dim);font-size:15px;}
+  .full-head-left .meta{color:var(--text-dim);font-size:clamp(15px, 1.1vw, 18px);}
   .full-actions{display:flex;gap:10px;}
   .full-body{
     flex:1;
     display:grid;
-    grid-template-columns:1fr 400px;
+    grid-template-columns:1fr minmax(400px, 33vw);
     gap:24px;
     align-items:start;
   }
@@ -366,14 +369,14 @@
     display:flex;
     justify-content:space-between;
     align-items:center;
-    padding:14px 22px;
+    padding:clamp(14px,1.3vw,22px) clamp(22px,1.8vw,32px);
     border-bottom:1px solid var(--border-soft);
     gap:16px;
   }
   .full-exlist .row:last-child{border-bottom:none;}
-  .full-exlist .exname{font-size:17px;font-weight:600;}
-  .full-exlist .excue{font-size:13px;color:var(--text-faint);margin-top:3px;max-width:640px;line-height:1.4;}
-  .full-exlist .examount{font-family:var(--font-mono);font-size:20px;color:var(--yellow);white-space:nowrap;flex-shrink:0;}
+  .full-exlist .exname{font-size:clamp(17px, 1.3vw, 24px);font-weight:600;}
+  .full-exlist .excue{font-size:clamp(13px, 0.95vw, 16px);color:var(--text-faint);margin-top:3px;max-width:900px;line-height:1.4;}
+  .full-exlist .examount{font-family:var(--font-mono);font-size:clamp(20px, 1.6vw, 30px);color:var(--yellow);white-space:nowrap;flex-shrink:0;}
   .full-exlist .row.trigger-row{background:var(--panel-2);}
   .trigger-tag{
     display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:700;
@@ -393,7 +396,7 @@
   .timer-panel{
     background:var(--panel);
     border:1px solid var(--border);
-    padding:26px 20px;
+    padding:clamp(26px,2.2vw,44px) clamp(20px,1.8vw,32px);
     display:flex;
     flex-direction:column;
     align-items:center;
@@ -401,7 +404,7 @@
   }
   .timer-phase{
     font-family:var(--font-mono);
-    font-size:14px;
+    font-size:clamp(14px, 1.1vw, 19px);
     font-weight:700;
     letter-spacing:.03em;
     color:var(--tier-color, var(--yellow));
@@ -410,21 +413,21 @@
   }
   .timer-display{
     font-family:var(--font-mono);
-    font-size:68px;
+    font-size:clamp(68px, 6.5vw, 130px);
     font-weight:700;
     line-height:1;
     letter-spacing:.02em;
     margin:8px 0;
   }
   .timer-display.warn{color:var(--red);}
-  .timer-meta{color:var(--text-dim);font-size:13px;}
-  .timer-total{color:var(--text-faint);font-size:12px;font-family:var(--font-mono);margin-bottom:16px;min-height:16px;}
+  .timer-meta{color:var(--text-dim);font-size:clamp(13px, 0.95vw, 16px);}
+  .timer-total{color:var(--text-faint);font-size:clamp(12px, 0.85vw, 14px);font-family:var(--font-mono);margin-bottom:16px;min-height:16px;}
   .timer-controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
   .timer-btn{
     font-family:var(--font-body);
     font-weight:700;
-    font-size:15px;
-    padding:14px 20px;
+    font-size:clamp(15px, 1.1vw, 18px);
+    padding:clamp(14px,1.2vw,18px) clamp(20px,1.8vw,28px);
     border:1px solid var(--border);
     background:var(--panel-2);
     color:var(--text);
@@ -2244,10 +2247,35 @@ function setNavActive(){
   if(setBtn) setBtn.classList.toggle('active', APP.screen==='settings');
 }
 
+// Keeps the screen from locking/dimming while on the workout screen — mainly
+// so the timer stays visible and audible mid-set without someone having to
+// keep tapping the screen. Not supported everywhere (desktop browsers mostly
+// don't implement it at all), so this fails silently where it isn't.
+let wakeLock = null;
+async function requestWakeLock(){
+  if(!('wakeLock' in navigator) || wakeLock) return;
+  try{
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', ()=>{ wakeLock = null; });
+  }catch(e){ wakeLock = null; /* permission denied / unsupported / page not visible yet — fine, this is a nice-to-have */ }
+}
+function releaseWakeLock(){
+  if(wakeLock){ try{ wakeLock.release(); }catch(e){} }
+  wakeLock = null;
+}
+// the OS automatically releases a wake lock whenever the page is hidden
+// (switching tabs/apps, manually locking the phone) — re-acquire it if the
+// user comes back while still on the workout screen, otherwise a session
+// that survived one backgrounding wouldn't survive a second.
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible' && APP.screen==='full') requestWakeLock();
+});
+
 function render(){
   setNavActive();
   renderSpotifyBanner();
   renderImportBanner();
+  if(APP.screen==='full') requestWakeLock(); else releaseWakeLock();
   if(APP.screen==='landing') return renderLanding();
   if(APP.screen==='picker') return renderPicker();
   if(APP.screen==='full') return renderFull();
