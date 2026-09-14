@@ -2279,9 +2279,14 @@ let APP = {screen:'landing', groupSize:null, four:[], selected:null};
 function goHome(){ clearTimerInterval(); APP.screen='landing'; render(); }
 function showFavourites(){ clearTimerInterval(); APP.screen='favourites'; render(); }
 let STREAK = { loaded:false, loading:false, currentStreak:0, longestStreak:0, sessionsThisWeek:0, totalSessions:0 };
-function showSettings(){ clearTimerInterval(); APP.screen='settings'; STREAK.loaded=false; render(); }
+function showSettings(){ clearTimerInterval(); APP.screen='settings'; render(); }
 
 async function loadStreakData(){
+  if(!ACCOUNT.loggedIn){
+    STREAK.currentStreak = 0; STREAK.longestStreak = 0; STREAK.sessionsThisWeek = 0; STREAK.totalSessions = 0;
+    STREAK.loaded = false;
+    return;
+  }
   STREAK.loading = true;
   try{
     const resp = await fetch('/api/me/streak');
@@ -2376,6 +2381,17 @@ function renderLanding(){
       <div class="label">${i===1?'solo':i<=2?'pair':'people'}</div>
     </div>`;
   }
+
+  if(ACCOUNT.loggedIn && !STREAK.loaded && !STREAK.loading) loadStreakData();
+  const streakStat = (val, label) => `<div><div style="font-family:var(--font-head);font-size:26px;font-weight:800;">${val}</div><div style="font-size:11px;color:var(--text-dim);">${label}</div></div>`;
+  const streakHtml = (ACCOUNT.loggedIn && STREAK.loaded) ? `
+    <div style="display:flex;gap:28px;justify-content:center;flex-wrap:wrap;margin-bottom:32px;">
+      ${streakStat(STREAK.currentStreak, 'week streak')}
+      ${streakStat(STREAK.longestStreak, 'longest streak')}
+      ${streakStat(STREAK.sessionsThisWeek, 'this week')}
+      ${streakStat(STREAK.totalSessions, 'total sessions')}
+    </div>` : '';
+
   $main.innerHTML = `
     <div class="screen">
       <div class="screen-narrow">
@@ -2383,6 +2399,7 @@ function renderLanding(){
           <h1 class="page-title">How many training today?</h1>
           <p class="page-sub">Pick the head count — the generator builds around it.</p>
         </div>
+        ${streakHtml}
         <div class="size-grid">${tiles}</div>
       </div>
     </div>`;
@@ -2611,16 +2628,6 @@ function renderSettings(){
   const patternOptions = PATTERNS.map(p=>`<option value="${p}">${p}</option>`).join('');
   const equipOptions = GYM_DATA.equipment.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
 
-  if(!STREAK.loaded && !STREAK.loading) loadStreakData();
-  const streakStat = (val, label) => `<div><div style="font-family:var(--font-head);font-size:28px;font-weight:800;">${val}</div><div style="font-size:12px;color:var(--text-dim);">${label}</div></div>`;
-  const streakHtml = STREAK.loaded ? `
-    <div style="display:flex;gap:28px;flex-wrap:wrap;margin-top:20px;padding-top:20px;border-top:1px solid var(--border-soft);">
-      ${streakStat(STREAK.currentStreak, 'week streak')}
-      ${streakStat(STREAK.longestStreak, 'longest streak')}
-      ${streakStat(STREAK.sessionsThisWeek, 'this week')}
-      ${streakStat(STREAK.totalSessions, 'total sessions')}
-    </div>` : `<p class="empty-state" style="margin-top:16px;">Loading&hellip;</p>`;
-
   $main.innerHTML = `
     <div class="screen">
       <div class="screen-narrow" style="max-width:1000px">
@@ -2641,7 +2648,6 @@ function renderSettings(){
               </div>
             </div>
           </div>
-          ${streakHtml}
         </div>
 
         <div class="panel-section">
@@ -3344,6 +3350,7 @@ async function checkLoginStatus(){
   renderImportBanner(); // show the one-time legacy-data import prompt now that we know whether they're logged in
   refreshServerRecentHistory(); // don't block the UI on this — repeat-avoidance just uses whatever's cached when generation runs
   loadGymData(); // equipment/exercises differ between logged-in (personal overlay) and logged-out (master-only) — refresh whenever login state is checked
+  loadStreakData(); // now shown on the home screen — fetch proactively so it's ready before the user gets there, not a visible pop-in
 }
 
 function signInWithGoogle(){
@@ -3356,6 +3363,7 @@ async function doLogout(){
   ACCOUNT.user = null;
   ACCOUNT.menuOpen = false;
   SERVER_RECENT_IDS = new Set();
+  STREAK.loaded = false;
   renderAccountWidget();
   loadGymData(); // drop back to master-only, read-only data now that personal overrides no longer apply
 }
