@@ -886,7 +886,13 @@ function weightedPick(candidates, recentIds, usedThisWorkout){
 const RUN_TYPE_IDS = new Set(['shuttle_runs','blue_mat_run','h145_run']);
 
 function pickExercisesForSession(format, groupSize, tierIdx, count){
-  const usable = allExercises().filter(exerciseUsable);
+  let usable = allExercises().filter(exerciseUsable);
+  // Shuttle runs aren't flagged as a trigger-only exercise (they stay close
+  // to the group, unlike a point-to-point run), but they were still ending
+  // up as a regular WRT station — taking someone off to the hangar with no
+  // trigger-swap logic to cover for them. Simplest fix: just keep them out
+  // of WRT entirely rather than reclassifying them.
+  if(format==='wrt') usable = usable.filter(ex=>ex.id!=='shuttle_runs');
   const rotationOk = format==='circuit' || format==='wrt' || groupSize<=2;
   const pool = rotationOk ? usable : usable.filter(ex=>!exerciseIsRotationOnly(ex));
   const triggerPool = usable.filter(ex=>ex.trigger);
@@ -966,6 +972,25 @@ function amountLabel(ex, tierIdx){
   // unit) falls back to a reps-style number rather than going blank.
   if(!ex.trigger && ex.base>0) return Math.max(4, Math.round(ex.base*(TIER_MULT[tierIdx]||1)/2)*2)+' reps';
   return '';
+}
+
+// WRT works through one exercise at a time — the whole group rotates through
+// work/rest/trigger roles on it until a TOTAL is collectively completed,
+// then moves on to the next exercise. That's a fundamentally different
+// number to the "per round" target every other format uses: it needs to
+// represent the full accumulated amount for that exercise's whole time
+// slice, not one short burst. ex.base is treated as roughly "how much in
+// ~75s of continuous work" (the same anchor the per-round scaling already
+// implicitly uses), scaled up to however long this exercise's slice of the
+// total workout actually is.
+function wrtTotalAmountLabel(ex, tierIdx, stationCount){
+  const stationSeconds = (TIER_MINUTES[tierIdx]*60) / stationCount;
+  const REFERENCE_SECONDS = 75;
+  const mult = TIER_MULT[tierIdx];
+  const raw = (ex.base * mult / REFERENCE_SECONDS) * stationSeconds;
+  if(ex.unit==='cal') return Math.max(10, Math.round(raw/5)*5)+' cal';
+  if(ex.unit==='time') return Math.max(30, Math.round(raw/10)*10)+'s';
+  return Math.max(10, Math.round(raw/5)*5)+' reps';
 }
 
 // ---- circuit timing: one shared, deterministic source of truth ----
@@ -1189,12 +1214,15 @@ function generateWorkout(format, groupSize, tierIdx){
     workout.numTeams = numTeams;
     workout.trigger = trig.name;
     workout.roundSwap = numTeams>1;
-    // Each work station keeps its normal per-exercise scaled target (the
-    // same amountLabel already computed for every exercise above) — a real
-    // rep/cal/time figure appropriate to that specific exercise, not a flat
-    // number applied uniformly regardless of exercise type. This is what
-    // tells the group roughly when the station will finish, and keeps the
-    // combined workload across all stations sane for the intended timeframe.
+    // Each work station's target is the TOTAL for its whole time slice
+    // (see wrtTotalAmountLabel above), not a single round's amount — this is
+    // what tells the group roughly how much they need to rack up between
+    // them before moving to the next exercise. `chosen` still has the full
+    // exercise objects (base, etc) that workout.exercises was trimmed from.
+    workout.exercises = chosen.map(ex=>({
+      id:ex.id, name:ex.name, pattern:ex.pattern, unit:ex.unit, cue:ex.cue||'', intensity:ex.intensity||2,
+      amountLabel: wrtTotalAmountLabel(ex, tierIdx, chosen.length),
+    }));
     // the trigger exercise runs every rotation but was previously only
     // mentioned in the instructions, never actually listed — add it as its
     // own row so it shows up alongside the work stations
