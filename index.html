@@ -2909,14 +2909,17 @@ function renderSettings(){
         <div class="panel-section">
           <h3>Equipment lists</h3>
           ${(() => {
-            const listRowHtml = (l, canDelete) => `
-              <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border:1px solid var(--border-soft);">
-                <span>${l.name}${l.id===EQUIPMENT_LISTS.activeListId?' <span class="tag-pill">active</span>':''}</span>
+            const listRowHtml = (l, canDelete) => {
+              const isActive = l.id===EQUIPMENT_LISTS.activeListId;
+              return `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border:1px solid ${isActive?'var(--yellow)':'var(--border-soft)'};cursor:pointer;" onclick="selectEquipmentListForEditing('${l.id}')">
+                <span>${l.name}${isActive?' <span class="tag-pill" style="color:var(--yellow);border-color:var(--yellow);">editing</span>':''}</span>
                 <span style="display:flex;gap:12px;">
-                  <button class="del-btn" onclick="renameEquipmentList('${l.id}', ${JSON.stringify(l.name)})">Rename</button>
-                  ${canDelete ? `<button class="del-btn" onclick="deleteEquipmentList('${l.id}')">Delete</button>` : ''}
+                  <button class="del-btn" onclick="event.stopPropagation();renameEquipmentList('${l.id}', ${JSON.stringify(l.name)})">Rename</button>
+                  ${canDelete ? `<button class="del-btn" onclick="event.stopPropagation();deleteEquipmentList('${l.id}')">Delete</button>` : ''}
                 </span>
               </div>`;
+            };
             const lockedCreateForm = lockedWrap(`
               <div class="add-ex-form"><input placeholder="New list name"><button class="btn btn-primary">Create list</button></div>`,
               'Multiple equipment lists');
@@ -2924,7 +2927,7 @@ function renderSettings(){
             if(isPremium()){
               const listRows = EQUIPMENT_LISTS.lists.map(l=>listRowHtml(l,true)).join('') || '<p class="empty-state">No saved lists yet.</p>';
               return `
-                <p class="page-sub" style="margin-bottom:14px;">Switch between different gyms or locations from the home screen.</p>
+                <p class="page-sub" style="margin-bottom:14px;">Switch between different gyms or locations from the home screen. Click a list below to edit its equipment.</p>
                 <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">${listRows}</div>
                 <div class="add-ex-form">
                   <input id="new-list-name" placeholder="New list name (e.g. Home Gym)">
@@ -2948,6 +2951,14 @@ function renderSettings(){
               </div>`;
           })()}
         </div>
+
+        ${(() => {
+          const activeList = EQUIPMENT_LISTS.lists.find(l=>l.id===EQUIPMENT_LISTS.activeListId);
+          if(EQUIPMENT_LISTS.lists.length<2) return ''; // unambiguous with 0 or 1 list — no label needed
+          return `<div style="text-align:center;margin-bottom:-4px;font-size:13px;color:var(--text-dim);">
+            Editing equipment for: <strong style="color:var(--yellow);">${activeList?activeList.name:'\u2014 pick a list above \u2014'}</strong>
+          </div>`;
+        })()}
 
         <div class="panel-section">
           <h3>Equipment on hand</h3>
@@ -2992,7 +3003,7 @@ async function toggleMyEquipmentOff(id, off){
   try{
     await fetch('/api/my/equipment-off', {
       method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ equipmentId:id, off }),
+      body: JSON.stringify({ equipmentId:id, off, listId:EQUIPMENT_LISTS.activeListId }),
     });
   }catch(e){}
   await loadGymData();
@@ -3012,6 +3023,13 @@ async function saveNickname(){
     renderAccountWidget();
     render();
   }catch(e){ alert('Save failed: ' + e.message); }
+}
+
+async function selectEquipmentListForEditing(listId){
+  if(listId===EQUIPMENT_LISTS.activeListId) return; // already editing this one
+  EQUIPMENT_LISTS.activeListId = listId;
+  await loadGymData();
+  render();
 }
 
 async function createEquipmentList(){
@@ -3074,7 +3092,7 @@ async function addMyEquipment(){
   try{
     await fetch('/api/my/equipment', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name, rotationOnly }),
+      body: JSON.stringify({ name, rotationOnly, listId:EQUIPMENT_LISTS.activeListId }),
     });
   }catch(e){ alert('Something went wrong adding that.'); }
   await loadGymData();
