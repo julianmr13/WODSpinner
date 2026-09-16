@@ -862,7 +862,9 @@ let EQUIPMENT_LISTS = { loaded:false, lists:[], activeListId:null };
 // set here, which is what keeps them on the plain unbranded default
 // equipment/exercise data everywhere downstream.
 async function loadEquipmentLists(){
-  if(!ACCOUNT.loggedIn || !ACCOUNT.user || (ACCOUNT.user.tier!=='premium' && ACCOUNT.user.tier!=='tfo')){
+  // fetches for any logged-in account now — free accounts can have one
+  // list too, just capped, so there's no tier to check before asking
+  if(!ACCOUNT.loggedIn){
     EQUIPMENT_LISTS = { loaded:true, lists:[], activeListId:null };
     return;
   }
@@ -2907,27 +2909,43 @@ function renderSettings(){
         <div class="panel-section">
           <h3>Equipment lists</h3>
           ${(() => {
-            const listRows = EQUIPMENT_LISTS.lists.map(l=>`
+            const listRowHtml = (l, canDelete) => `
               <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border:1px solid var(--border-soft);">
                 <span>${l.name}${l.id===EQUIPMENT_LISTS.activeListId?' <span class="tag-pill">active</span>':''}</span>
-                <button class="del-btn" onclick="deleteEquipmentList('${l.id}')">Delete</button>
-              </div>`).join('') || '<p class="empty-state">No saved lists yet.</p>';
-            const realContent = `
-              <p class="page-sub" style="margin-bottom:14px;">Switch between different gyms or locations from the home screen.</p>
-              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">${listRows}</div>
+                <span style="display:flex;gap:12px;">
+                  <button class="del-btn" onclick="renameEquipmentList('${l.id}', ${JSON.stringify(l.name)})">Rename</button>
+                  ${canDelete ? `<button class="del-btn" onclick="deleteEquipmentList('${l.id}')">Delete</button>` : ''}
+                </span>
+              </div>`;
+            const lockedCreateForm = lockedWrap(`
+              <div class="add-ex-form"><input placeholder="New list name"><button class="btn btn-primary">Create list</button></div>`,
+              'Multiple equipment lists');
+
+            if(isPremium()){
+              const listRows = EQUIPMENT_LISTS.lists.map(l=>listRowHtml(l,true)).join('') || '<p class="empty-state">No saved lists yet.</p>';
+              return `
+                <p class="page-sub" style="margin-bottom:14px;">Switch between different gyms or locations from the home screen.</p>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">${listRows}</div>
+                <div class="add-ex-form">
+                  <input id="new-list-name" placeholder="New list name (e.g. Home Gym)">
+                  <button class="btn btn-primary" onclick="createEquipmentList()">Create list</button>
+                </div>`;
+            }
+
+            if(EQUIPMENT_LISTS.lists.length>0){
+              const listRows = EQUIPMENT_LISTS.lists.map(l=>listRowHtml(l,false)).join('');
+              return `
+                <p class="page-sub" style="margin-bottom:14px;">Free accounts get one equipment list. You can rename or edit it any time.</p>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">${listRows}</div>
+                ${lockedCreateForm}`;
+            }
+
+            return `
+              <p class="page-sub" style="margin-bottom:14px;">Give your equipment setup a name.</p>
               <div class="add-ex-form">
-                <input id="new-list-name" placeholder="New list name (e.g. Home Gym)">
+                <input id="new-list-name" placeholder="e.g. Home Gym">
                 <button class="btn btn-primary" onclick="createEquipmentList()">Create list</button>
               </div>`;
-            if(isPremium()) return realContent;
-            const previewContent = `
-              <p class="page-sub" style="margin-bottom:14px;">Switch between different gyms or locations from the home screen.</p>
-              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border:1px solid var(--border-soft);"><span>Home Gym</span></div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border:1px solid var(--border-soft);"><span>Work Gym</span></div>
-              </div>
-              <div class="add-ex-form"><input placeholder="New list name"><button class="btn btn-primary">Create list</button></div>`;
-            return lockedWrap(previewContent, 'Multiple equipment lists');
           })()}
         </div>
 
@@ -3015,6 +3033,24 @@ async function createEquipmentList(){
     loadGymData();
     render();
   }catch(e){ alert('Couldn\u2019t create that list: ' + e.message); }
+}
+
+async function renameEquipmentList(id, currentName){
+  const newName = prompt('Rename this list:', currentName);
+  if(newName===null) return; // cancelled
+  const trimmed = newName.trim();
+  if(!trimmed || trimmed===currentName) return;
+  try{
+    const resp = await fetch('/api/my/equipment-lists/'+id, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name: trimmed }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){ alert('Rename failed: ' + (data.detail || data.error || resp.status)); return; }
+    const list = EQUIPMENT_LISTS.lists.find(l=>l.id===id);
+    if(list) list.name = data.name || trimmed;
+    render();
+  }catch(e){ alert('Rename failed: ' + e.message); }
 }
 
 async function deleteEquipmentList(id){

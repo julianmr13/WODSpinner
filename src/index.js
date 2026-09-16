@@ -67,6 +67,14 @@ export default {
       }
       if (path === '/api/popular') return handlePopular(request, env);
       if (path === '/api/gym-data') return handleGymData(request, env);
+      if (path === '/api/my/equipment-lists' && request.method === 'GET') return handleListEquipmentLists(request, env);
+      if (path === '/api/my/equipment-lists' && request.method === 'POST') return handleCreateEquipmentList(request, env);
+      if (path.startsWith('/api/my/equipment-lists/') && request.method === 'DELETE') {
+        return handleDeleteEquipmentList(request, env, path.slice('/api/my/equipment-lists/'.length));
+      }
+      if (path.startsWith('/api/my/equipment-lists/') && request.method === 'PUT') {
+        return handleRenameEquipmentList(request, env, path.slice('/api/my/equipment-lists/'.length));
+      }
       if (path === '/api/my/equipment-off' && request.method === 'PUT') return handleToggleEquipmentOff(request, env);
       if (path === '/api/my/equipment' && request.method === 'POST') return handleAddMyEquipment(request, env);
       if (path.startsWith('/api/my/equipment/') && request.method === 'DELETE') {
@@ -280,6 +288,8 @@ async function handleMyStreak(request, env) {
     const thisWeekKey = mondayOfWeekUTC(Date.now());
     const lastWeekKey = thisWeekKey - WEEK_MS;
     const mostRecent = weekKeys[weekKeys.length-1];
+    // the streak is only still "alive" if the most recent trained week is
+    // this week or last week — anything older means it's already broken
     if (mostRecent===thisWeekKey || mostRecent===lastWeekKey) {
       let idx = weekKeys.length-1, count = 1;
       while (idx>0 && weekKeys[idx]-weekKeys[idx-1]===WEEK_MS) { count++; idx--; }
@@ -634,6 +644,8 @@ async function handleAdminDeleteExercise(request, env, id){
 
 async function handleGymData(request, env){
   const user = await getSessionUser(request, env);
+  const url = new URL(request.url);
+  const listId = url.searchParams.get('list');
 
   const { results: masterEquip } = await env.DB.prepare(
     'SELECT id, name, rotation_only FROM master_equipment ORDER BY name'
@@ -654,15 +666,36 @@ async function handleGymData(request, env){
     });
   }
 
-  const [offRows, customEquipRows, hiddenRows, customExRows, favRows] = await Promise.all([
-    env.DB.prepare('SELECT equipment_id FROM user_equipment_off WHERE user_id = ?').bind(user.id).all(),
-    env.DB.prepare('SELECT id, name, rotation_only FROM user_equipment_custom WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
+  // Equipment on/off + custom equipment come from a specific named list when
+  // one's given and actually belongs to this user (Premium/TFO) — otherwise
+  // fall back to the classic per-user tables untouched by any of this, which
+  // is what free/logged-out-equivalent accounts always use.
+  let offIds, customEquipResults;
+  if(listId){
+    const list = await env.DB.prepare('SELECT id FROM user_equipment_lists WHERE id = ? AND user_id = ?').bind(listId, user.id).first();
+    if(list){
+      const [offRows, customRows] = await Promise.all([
+        env.DB.prepare('SELECT equipment_id FROM list_equipment_off WHERE list_id = ?').bind(listId).all(),
+        env.DB.prepare('SELECT id, name, rotation_only FROM list_equipment_custom WHERE list_id = ? AND promoted_master_id IS NULL').bind(listId).all(),
+      ]);
+      offIds = new Set(offRows.results.map(r=>r.equipment_id));
+      customEquipResults = customRows.results;
+    }
+  }
+  if(offIds === undefined){
+    const [offRows, customRows] = await Promise.all([
+      env.DB.prepare('SELECT equipment_id FROM user_equipment_off WHERE user_id = ?').bind(user.id).all(),
+      env.DB.prepare('SELECT id, name, rotation_only FROM user_equipment_custom WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
+    ]);
+    offIds = new Set(offRows.results.map(r=>r.equipment_id));
+    customEquipResults = customRows.results;
+  }
+
+  const [hiddenRows, customExRows, favRows] = await Promise.all([
     env.DB.prepare('SELECT exercise_id FROM user_hidden_exercises WHERE user_id = ?').bind(user.id).all(),
     env.DB.prepare('SELECT id, name, pattern, equip_json, unit, base, intensity, cue, unilateral FROM user_exercises WHERE user_id = ? AND promoted_master_id IS NULL').bind(user.id).all(),
     env.DB.prepare('SELECT exercise_id FROM user_favourite_exercises WHERE user_id = ?').bind(user.id).all(),
   ]);
-
-  const offIds = new Set(offRows.results.map(r=>r.equipment_id));
   const hiddenIds = new Set(hiddenRows.results.map(r=>r.exercise_id));
 
   // Always return every master item, tagged with whether it's off/hidden for
@@ -670,7 +703,7 @@ async function handleGymData(request, env){
   // flagging it) would mean Settings could never show it again to undo.
   const equipment = [
     ...masterEquip.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:false, off:offIds.has(e.id) })),
-    ...customEquipRows.results.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:true, off:false })),
+    ...customEquipResults.map(e=>({ id:e.id, name:e.name, rotationOnly:!!e.rotation_only, personal:true, off:false })),
   ];
   const exercises = [
     ...masterEx.map(e=>({
@@ -691,6 +724,64 @@ async function handleGymData(request, env){
   });
 }
 
+// ---- equipment lists (Premium/TFO — multiple named equipment setups) ----
+
+async function handleListEquipmentLists(request, env){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  const { results } = await env.DB.prepare(
+    'SELECT id, name, created_at FROM user_equipment_lists WHERE user_id = ? ORDER BY created_at ASC'
+  ).bind(user.id).all();
+  return json({ lists: results });
+}
+
+async function handleCreateEquipmentList(request, env){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const name = String((body||{}).name||'').trim().slice(0,60);
+  if(!name) return json({error:'Missing name'}, 400);
+
+  if(user.tier !== 'premium' && user.tier !== 'tfo'){
+    const { results } = await env.DB.prepare('SELECT id FROM user_equipment_lists WHERE user_id = ?').bind(user.id).all();
+    if(results.length >= 1) return json({error:'Free accounts can only have one equipment list'}, 403);
+  }
+
+  const id = generateId(12);
+  await env.DB.prepare(
+    'INSERT INTO user_equipment_lists (id, user_id, name, created_at) VALUES (?, ?, ?, ?)'
+  ).bind(id, user.id, name, Date.now()).run();
+  return json({ id, name }, 201);
+}
+
+async function handleRenameEquipmentList(request, env, id){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  let body;
+  try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
+  const name = String((body||{}).name||'').trim().slice(0,60);
+  if(!name) return json({error:'Missing name'}, 400);
+  const list = await env.DB.prepare('SELECT id FROM user_equipment_lists WHERE id = ? AND user_id = ?').bind(id, user.id).first();
+  if(!list) return json({error:'Not found'}, 404);
+  await env.DB.prepare('UPDATE user_equipment_lists SET name = ? WHERE id = ?').bind(name, id).run();
+  return json({ ok:true, name });
+}
+
+async function handleDeleteEquipmentList(request, env, id){
+  const user = await getSessionUser(request, env);
+  if(!user) return json({error:'Not logged in'}, 401);
+  // free accounts must always have exactly one list — the generator relies
+  // on that (it's what falls back to when nothing's explicitly chosen)
+  if(user.tier !== 'premium' && user.tier !== 'tfo') return json({error:'Free accounts can\u2019t delete their equipment list \u2014 rename or edit it instead'}, 403);
+  const list = await env.DB.prepare('SELECT id FROM user_equipment_lists WHERE id = ? AND user_id = ?').bind(id, user.id).first();
+  if(!list) return json({error:'Not found'}, 404);
+  await env.DB.prepare('DELETE FROM list_equipment_off WHERE list_id = ?').bind(id).run();
+  await env.DB.prepare('DELETE FROM list_equipment_custom WHERE list_id = ?').bind(id).run();
+  await env.DB.prepare('DELETE FROM user_equipment_lists WHERE id = ?').bind(id).run();
+  return json({ ok:true });
+}
+
 // ---- personal equipment ----
 
 async function handleToggleEquipmentOff(request, env){
@@ -698,8 +789,20 @@ async function handleToggleEquipmentOff(request, env){
   if(!user) return json({error:'Not logged in'}, 401);
   let body;
   try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
-  const { equipmentId, off } = body || {};
+  const { equipmentId, off, listId } = body || {};
   if(!equipmentId) return json({error:'Missing equipmentId'}, 400);
+
+  if(listId){
+    const list = await env.DB.prepare('SELECT id FROM user_equipment_lists WHERE id = ? AND user_id = ?').bind(listId, user.id).first();
+    if(!list) return json({error:'List not found'}, 404);
+    if(off){
+      await env.DB.prepare('INSERT OR IGNORE INTO list_equipment_off (list_id, equipment_id) VALUES (?, ?)').bind(listId, equipmentId).run();
+    } else {
+      await env.DB.prepare('DELETE FROM list_equipment_off WHERE list_id = ? AND equipment_id = ?').bind(listId, equipmentId).run();
+    }
+    return json({ ok:true });
+  }
+
   if(off){
     await env.DB.prepare('INSERT OR IGNORE INTO user_equipment_off (user_id, equipment_id) VALUES (?, ?)').bind(user.id, equipmentId).run();
   } else {
@@ -713,8 +816,19 @@ async function handleAddMyEquipment(request, env){
   if(!user) return json({error:'Not logged in'}, 401);
   let body;
   try{ body = await request.json(); }catch(e){ return json({error:'Invalid JSON body'}, 400); }
-  const { name, rotationOnly } = body || {};
+  const { name, rotationOnly, listId } = body || {};
   if(!name) return json({error:'Missing name'}, 400);
+
+  if(listId){
+    const list = await env.DB.prepare('SELECT id FROM user_equipment_lists WHERE id = ? AND user_id = ?').bind(listId, user.id).first();
+    if(!list) return json({error:'List not found'}, 404);
+    const id = generateId(12);
+    await env.DB.prepare(
+      'INSERT INTO list_equipment_custom (id, list_id, user_id, name, rotation_only, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(id, listId, user.id, name, rotationOnly?1:0, Date.now()).run();
+    return json({ id }, 201);
+  }
+
   const id = generateId(12);
   await env.DB.prepare(
     'INSERT INTO user_equipment_custom (id, user_id, name, rotation_only, created_at) VALUES (?, ?, ?, ?, ?)'
@@ -725,7 +839,12 @@ async function handleAddMyEquipment(request, env){
 async function handleDeleteMyEquipment(request, env, id){
   const user = await getSessionUser(request, env);
   if(!user) return json({error:'Not logged in'}, 401);
+  // the id could belong to either the classic per-user table or a list —
+  // try both, scoped to this user's own rows either way; only the real match deletes anything
   await env.DB.prepare('DELETE FROM user_equipment_custom WHERE id = ? AND user_id = ?').bind(id, user.id).run();
+  await env.DB.prepare(
+    'DELETE FROM list_equipment_custom WHERE id = ? AND list_id IN (SELECT id FROM user_equipment_lists WHERE user_id = ?)'
+  ).bind(id, user.id).run();
   return json({ ok:true });
 }
 
@@ -792,6 +911,9 @@ async function handlePopular(request, env) {
     'SELECT format, COUNT(*) as count FROM workout_history GROUP BY format ORDER BY count DESC LIMIT 10'
   ).all();
 
+  // exercise-level popularity: aggregate in JS rather than relying on SQLite's
+  // JSON1 functions, since gym-scale data (dozens to low hundreds of rows) is
+  // trivial to process this way and it avoids depending on exact D1 JSON support
   const { results: allHistory } = await env.DB.prepare('SELECT workout_json FROM workout_history').all();
   const exerciseCounts = {};
   for (const row of allHistory) {
