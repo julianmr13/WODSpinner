@@ -203,6 +203,31 @@
     content:"SOLO / PAIR";
   }
 
+  /* ---------- Location picker (Premium/TFO multi-gym) ---------- */
+  .location-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+    gap:16px;
+    max-width:820px;
+    margin:0 auto;
+    width:100%;
+  }
+  .location-tile{
+    background:var(--panel);
+    border:1px solid var(--border);
+    padding:26px 16px;
+    min-height:90px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    font-size:16px;
+    font-weight:700;
+    cursor:pointer;
+    transition:transform .12s ease, border-color .12s;
+  }
+  .location-tile:hover{border-color:var(--yellow); transform:translateY(-2px);}
+
   /* ---------- Picker: 4 columns ---------- */
   .picker-header{
     display:flex;
@@ -317,6 +342,13 @@
   .ex-line:last-child{border-bottom:none;}
   .ex-name{color:var(--text);}
   .ex-amount{font-family:var(--font-mono);color:var(--text-dim);white-space:nowrap;}
+  .ex-name-wrap{display:flex;align-items:center;gap:6px;min-width:0;}
+  .ex-swap-btn{
+    background:none;border:none;cursor:pointer;padding:1px 3px;
+    color:var(--text-faint);opacity:0.4;font-size:12px;line-height:1;flex-shrink:0;
+    transition:opacity .15s,color .15s;
+  }
+  .ex-swap-btn:hover{opacity:0.9;color:var(--yellow);}
   .wod-card-foot{
     padding:12px 18px;
     border-top:1px solid var(--border-soft);
@@ -609,6 +641,17 @@
   .fav-filter{margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-dim);}
   .fav-filter select{background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:7px 10px;}
   .empty-state{color:var(--text-faint);font-size:14px;padding:30px 0;text-align:center;}
+
+  /* ---------- Locked / Premium features ---------- */
+  .locked-overlay{position:relative;cursor:pointer;}
+  .locked-overlay > .locked-content{opacity:0.4;filter:grayscale(60%);pointer-events:none;}
+  .locked-badge{
+    position:absolute; top:8px; right:8px; z-index:2;
+    display:inline-flex; align-items:center; gap:5px;
+    font-family:var(--font-mono); font-size:10px; font-weight:700;
+    background:var(--yellow); color:#121417;
+    padding:3px 8px; letter-spacing:.05em; text-transform:uppercase;
+  }
 </style>
 </head>
 <body>
@@ -791,8 +834,56 @@ function saveState(){
 let GYM_DATA = { loggedIn:false, equipment:[], exercises:[], favouriteExerciseIds:[] };
 let GYM_DATA_READY = null;
 
+// ---- Premium/TFO gating ----
+// TFO is a permanent "life member" tier (all features, always), so the only
+// real per-feature question is binary: free, or Premium/TFO. This is the
+// single source of truth for that check — everything gated reads through it.
+function isPremium(){
+  return !!(ACCOUNT.loggedIn && ACCOUNT.user && (ACCOUNT.user.tier==='premium' || ACCOUNT.user.tier==='tfo'));
+}
+function showPremiumPrompt(feature){
+  alert((feature||'This')+' is a Premium feature. Upgrade your account to unlock it.');
+}
+// Wraps a chunk of already-built HTML with the muted/greyed treatment plus a
+// "Premium" badge — the content stays visible (never hidden) but is
+// unclickable underneath, and clicking anywhere on it shows the upgrade
+// prompt instead. Used everywhere a feature is gated, so the look and
+// behaviour stays identical across all of them.
+function lockedWrap(innerHtml, featureName){
+  return `<div class="locked-overlay" onclick="showPremiumPrompt('${featureName}')">
+    <div class="locked-content">${innerHtml}</div>
+    <span class="locked-badge">Premium</span>
+  </div>`;
+}
+
+let EQUIPMENT_LISTS = { loaded:false, lists:[], activeListId:null };
+
+// Only meaningful for Premium/TFO — free accounts always get an empty list
+// set here, which is what keeps them on the plain unbranded default
+// equipment/exercise data everywhere downstream.
+async function loadEquipmentLists(){
+  if(!ACCOUNT.loggedIn || !ACCOUNT.user || (ACCOUNT.user.tier!=='premium' && ACCOUNT.user.tier!=='tfo')){
+    EQUIPMENT_LISTS = { loaded:true, lists:[], activeListId:null };
+    return;
+  }
+  try{
+    const resp = await fetch('/api/my/equipment-lists');
+    const data = await resp.json();
+    EQUIPMENT_LISTS.lists = data.lists || [];
+  }catch(e){
+    EQUIPMENT_LISTS.lists = [];
+  }
+  EQUIPMENT_LISTS.loaded = true;
+  // exactly one list is an unambiguous choice — auto-select it so this
+  // account never sees a "pick between one option" screen for no reason
+  if(EQUIPMENT_LISTS.lists.length===1 && !EQUIPMENT_LISTS.activeListId){
+    EQUIPMENT_LISTS.activeListId = EQUIPMENT_LISTS.lists[0].id;
+  }
+}
+
 function loadGymData(){
-  GYM_DATA_READY = fetch('/api/gym-data')
+  const listParam = EQUIPMENT_LISTS.activeListId ? ('?list='+encodeURIComponent(EQUIPMENT_LISTS.activeListId)) : '';
+  GYM_DATA_READY = fetch('/api/gym-data'+listParam)
     .then(r=>r.json())
     .then(data=>{
       GYM_DATA.loggedIn = !!data.loggedIn;
@@ -1080,6 +1171,12 @@ function circuitWorkRest(tierIdx){
 function circuitRoundsFor(tierIdx, stations){
   const {work, rest} = circuitWorkRest(tierIdx);
   const targetSec = TIER_MINUTES[tierIdx]*60;
+  // stations should never legitimately be 0 (there's always at least one
+  // exercise), but if gym data somehow failed to load and nothing was
+  // available to build a workout from, dividing by zero would give
+  // Infinity — and a downstream loop iterating "Infinity" times would
+  // freeze the tab completely rather than just showing an empty result.
+  if(!stations || stations<=0) return 2;
   return Math.max(2, Math.round(targetSec/(stations*(work+rest))));
 }
 // picks the station count (>= groupSize, ideally close to it) that gets the
@@ -1802,6 +1899,15 @@ function buildConfettiHtml(){
 // confetti/message above it.
 function celebrationFeedbackHtml(){
   if(!ACCOUNT.loggedIn || !TIMER || !TIMER.historyId) return ''; // nothing to attach feedback to — celebration still shows regardless
+  if(!isPremium()){
+    return lockedWrap(`
+      <div class="celebration-feedback-label">How did that feel?</div>
+      <div class="celebration-feedback-btns">
+        <button>Too easy</button>
+        <button>Just right</button>
+        <button>Too hard</button>
+      </div>`, 'Post-workout feedback');
+  }
   if(TIMER.feedbackSubmitted) return `<div class="celebration-thanks">Thanks \u2014 noted!</div>`;
   return `
     <div class="celebration-feedback-label">How did that feel?</div>
@@ -2210,6 +2316,14 @@ function renderSpotifyPanel(){
   const el = document.getElementById('spotify-panel');
   if(!el) return;
 
+  if(!isPremium()){
+    el.innerHTML = lockedWrap(`
+      <div class="sp-head">Music</div>
+      <p class="sp-note">Connect Spotify to play a playlist while this session runs.</p>
+      <button class="btn btn-spotify">Connect Spotify</button>`, 'Spotify integration');
+    return;
+  }
+
   if(!spotifyLoggedIn() && !(SPOTIFY.auth && SPOTIFY.auth.refresh_token)){
     el.innerHTML = `
       <div class="sp-head">Music</div>
@@ -2285,7 +2399,10 @@ function renderSpotifyPanel(){
 const $main = document.getElementById('main');
 let APP = {screen:'landing', groupSize:null, four:[], selected:null};
 
-function goHome(){ clearTimerInterval(); APP.screen='landing'; render(); }
+function shouldShowLocationScreen(){
+  return EQUIPMENT_LISTS.loaded && EQUIPMENT_LISTS.lists.length>=2 && !EQUIPMENT_LISTS.activeListId;
+}
+function goHome(){ clearTimerInterval(); APP.screen = shouldShowLocationScreen() ? 'location' : 'landing'; render(); }
 function showFavourites(){ clearTimerInterval(); APP.screen='favourites'; render(); }
 let STREAK = { loaded:false, loading:false, currentStreak:0, longestStreak:0, sessionsThisWeek:0, totalSessions:0 };
 function showSettings(){ clearTimerInterval(); APP.screen='settings'; render(); }
@@ -2353,6 +2470,7 @@ function render(){
   renderSpotifyBanner();
   renderImportBanner();
   if(APP.screen==='full') requestWakeLock(); else releaseWakeLock();
+  if(APP.screen==='location') return renderLocationScreen();
   if(APP.screen==='landing') return renderLanding();
   if(APP.screen==='picker') return renderPicker();
   if(APP.screen==='full') return renderFull();
@@ -2382,6 +2500,29 @@ function dismissSpotifyBanner(){
   renderSpotifyBanner();
 }
 
+function selectLocation(listId){
+  EQUIPMENT_LISTS.activeListId = listId;
+  loadGymData(); // refetch with the newly chosen list's equipment/exercise data
+  APP.screen = 'landing';
+  render();
+}
+
+function renderLocationScreen(){
+  const tiles = EQUIPMENT_LISTS.lists.map(l=>`
+    <div class="location-tile" onclick="selectLocation('${l.id}')">${l.name}</div>
+  `).join('');
+  $main.innerHTML = `
+    <div class="screen">
+      <div class="screen-narrow">
+        <div class="eyebrow-block">
+          <h1 class="page-title">Where are you working out today?</h1>
+          <p class="page-sub">Pick your equipment setup for this session.</p>
+        </div>
+        <div class="location-grid">${tiles}</div>
+      </div>
+    </div>`;
+}
+
 function renderLanding(){
   let tiles='';
   for(let i=1;i<=12;i++){
@@ -2401,6 +2542,13 @@ function renderLanding(){
       ${streakStat(STREAK.totalSessions, 'total sessions')}
     </div>` : '';
 
+  const activeList = EQUIPMENT_LISTS.lists.find(l=>l.id===EQUIPMENT_LISTS.activeListId);
+  const locationHtml = (EQUIPMENT_LISTS.lists.length>=2 && activeList) ? `
+    <div style="text-align:center;margin-bottom:20px;font-size:13px;color:var(--text-dim);">
+      Training at <strong style="color:var(--text);">${activeList.name}</strong> &middot;
+      <a href="#" onclick="changeLocation();return false;" style="color:var(--yellow);">Change</a>
+    </div>` : '';
+
   $main.innerHTML = `
     <div class="screen">
       <div class="screen-narrow">
@@ -2408,11 +2556,14 @@ function renderLanding(){
           <h1 class="page-title">How many training today?</h1>
           <p class="page-sub">Pick the head count — the generator builds around it.</p>
         </div>
+        ${locationHtml}
         ${streakHtml}
         <div class="size-grid">${tiles}</div>
       </div>
     </div>`;
 }
+
+function changeLocation(){ clearTimerInterval(); APP.screen='location'; render(); }
 
 async function selectGroupSize(n){
   if(GYM_DATA_READY) await GYM_DATA_READY; // make sure real equipment/exercise data has arrived before generating
@@ -2441,7 +2592,13 @@ function buildWodCardsHtml(four){
       cardList = w.exercises.slice(0,6);
     }
     const exLines = cardList.map(e=>`
-      <div class="ex-line"><span class="ex-name">${e.name}${e.isTrigger?' (trigger)':''}${e.isCoreRole?' (core)':''}</span><span class="ex-amount">${e.amountLabel}</span></div>
+      <div class="ex-line">
+        <span class="ex-name-wrap">
+          <span class="ex-name">${e.name}${e.isTrigger?' (trigger)':''}${e.isCoreRole?' (core)':''}</span>
+          <button class="ex-swap-btn" title="Swap this exercise" onclick="event.stopPropagation();${isPremium()?`swapCardExercise(${i},'${e.id}')`:`showPremiumPrompt('Exercise swapping')`}">\u{1F504}</button>
+        </span>
+        <span class="ex-amount">${e.amountLabel}</span>
+      </div>
     `).join('');
     const footer = w.grouping && w.grouping.short ? w.grouping.short + (w.format==='wrt' ? ` &middot; Trigger: ${w.trigger}` : '') : '';
     return `
@@ -2480,6 +2637,90 @@ function renderPicker(){
         <button class="btn-spin" onclick="reshuffleFour()">Spin again!</button>
       </div>
     </div>`;
+}
+
+// Premium/TFO — rerolls a single exercise line in place without regenerating
+// the whole workout: same movement pattern, same role (regular station /
+// trigger / core role), everything else about the card untouched. The
+// displayed tier/duration/difficulty label is deliberately NOT recalculated —
+// someone reaching for this wants to keep the workout they already liked,
+// just swap the one line that doesn't work for them.
+function pickSwapReplacement(w, current){
+  const usedIds = new Set(w.exercises.map(e=>e.id)); // includes current — never re-pick the same one
+  const hasRunTypeElsewhere = w.exercises.some(e=>e.id!==current.id && RUN_TYPE_IDS.has(e.id));
+
+  if(current.isTrigger){
+    let pool = allExercises().filter(exerciseUsable).filter(ex=>ex.trigger && !usedIds.has(ex.id));
+    if(w.numTeams>1){
+      const spareEnough = pool.filter(t=>!t.equip.some(e=>SCARCE_SINGLE_EQUIP.has(e)));
+      if(spareEnough.length>0) pool = spareEnough;
+    }
+    if(hasRunTypeElsewhere){
+      const noRun = pool.filter(t=>!RUN_TYPE_IDS.has(t.id));
+      if(noRun.length>0) pool = noRun;
+    }
+    if(pool.length===0) return null;
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+
+  if(current.isCoreRole){
+    const pool = allExercises().filter(ex=>ex.pattern==='core' && exerciseUsable(ex) && !ex.trigger && !usedIds.has(ex.id));
+    if(pool.length===0) return null;
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+
+  const rotationOk = w.format==='circuit' || w.format==='wrt' || w.groupSize<=2;
+  let pool = allExercises().filter(exerciseUsable).filter(ex=>
+    ex.pattern===current.pattern && !ex.trigger && !usedIds.has(ex.id) &&
+    (rotationOk || !exerciseIsRotationOnly(ex)) &&
+    !(RUN_TYPE_IDS.has(ex.id) && hasRunTypeElsewhere)
+  );
+  if(w.format==='wrt') pool = pool.filter(ex=>ex.id!=='shuttle_runs'); // same exclusion as normal WRT generation
+  if(pool.length===0) return null;
+  const recentIds = recentlyUsedIds(7);
+  return weightedPick(pool, recentIds, usedIds) || pool[Math.floor(Math.random()*pool.length)];
+}
+
+function applySwap(w, idx, newEx){
+  const old = w.exercises[idx];
+  let newAmountLabel;
+  if(w.format==='tabata' || w.format==='circuit'){
+    newAmountLabel = ''; // these formats never show a rep/time target — the clock governs
+  } else if(old.isTrigger){
+    newAmountLabel = 'Every rotation';
+    w.trigger = newEx.name;
+  } else if(old.isCoreRole){
+    newAmountLabel = newEx.unit==='time' ? 'Continuous' : 'Every rotation';
+    w.coreRoleExercise = newEx.name;
+  } else if(w.format==='wrt'){
+    const stationCount = w.exercises.filter(e=>!e.isTrigger && !e.isCoreRole).length;
+    newAmountLabel = wrtTotalAmountLabel(newEx, w.tierIdx, stationCount);
+  } else {
+    newAmountLabel = amountLabel(newEx, w.tierIdx);
+  }
+
+  w.exercises[idx] = {
+    id:newEx.id, name:newEx.name, pattern:newEx.pattern, unit:newEx.unit,
+    cue:newEx.cue||'', intensity:newEx.intensity||2,
+    amountLabel:newAmountLabel,
+    isTrigger:!!old.isTrigger, isCoreRole:!!old.isCoreRole,
+  };
+
+  // the trigger/core-role names are embedded in the WRT grouping detail text —
+  // rebuild it so a swap there doesn't leave the instructions referencing the old exercise
+  if(w.format==='wrt') w.grouping = buildGroupingNote(w);
+}
+
+function swapCardExercise(cardIndex, exerciseId){
+  if(!isPremium()){ showPremiumPrompt('Exercise swapping'); return; }
+  const w = APP.four[cardIndex];
+  if(!w) return;
+  const idx = w.exercises.findIndex(e=>e.id===exerciseId);
+  if(idx===-1) return;
+  const replacement = pickSwapReplacement(w, w.exercises[idx]);
+  if(!replacement){ alert('No other exercise available to swap in right now.'); return; }
+  applySwap(w, idx, replacement);
+  render();
 }
 
 function openWorkout(i){
@@ -2540,7 +2781,7 @@ function renderFull(){
             <div class="meta">${w.structure} &middot; ${w.groupSize} ${w.groupSize===1?'person':'people'}</div>
           </div>
           <div class="full-actions">
-            <button class="btn" onclick="toggleFavouriteWorkout()">${fav?'\u2605 Favourited':'\u2606 Favourite this'}</button>
+            <button class="btn" onclick="${isPremium()?'toggleFavouriteWorkout()':`showPremiumPrompt('Favourites')`}" style="${isPremium()?'':'opacity:0.5;'}">${fav?'\u2605 Favourited':'\u2606 Favourite this'}${isPremium()?'':' <span style=\"font-size:10px;\">(Premium)</span>'}</button>
             ${w.fromFavourites ? '' : '<button class="btn btn-ghost btn-back" onclick="backToPicker()">&larr; Back</button>'}
             <button class="btn btn-ghost" onclick="goHome()">Home</button>
           </div>
@@ -2647,16 +2888,47 @@ function renderSettings(){
 
         <div class="panel-section">
           <h3>Your profile</h3>
-          <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
-            ${avatarHtml(ACCOUNT.user, 'avatar-thumb-lg', 28)}
-            <div style="flex:1;min-width:220px;">
-              <label style="display:block;font-size:13px;color:var(--text-dim);margin-bottom:6px;">Nickname (shown instead of your Google name around the app)</label>
-              <div style="display:flex;gap:8px;">
-                <input id="nickname-input" placeholder="${ACCOUNT.user.display_name||'e.g. Jules'}" value="${ACCOUNT.user.nickname||''}" style="flex:1;">
-                <button class="btn btn-primary" onclick="saveNickname()">Save</button>
+          ${(() => {
+            const profileContent = `
+              <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
+                ${avatarHtml(ACCOUNT.user, 'avatar-thumb-lg', 28)}
+                <div style="flex:1;min-width:220px;">
+                  <label style="display:block;font-size:13px;color:var(--text-dim);margin-bottom:6px;">Nickname (shown instead of your Google name around the app)</label>
+                  <div style="display:flex;gap:8px;">
+                    <input id="nickname-input" placeholder="${ACCOUNT.user.display_name||'e.g. Jules'}" value="${ACCOUNT.user.nickname||''}" style="flex:1;">
+                    <button class="btn btn-primary" onclick="saveNickname()">Save</button>
+                  </div>
+                </div>
+              </div>`;
+            return isPremium() ? profileContent : lockedWrap(profileContent, 'Nickname & avatar customization');
+          })()}
+        </div>
+
+        <div class="panel-section">
+          <h3>Equipment lists</h3>
+          ${(() => {
+            const listRows = EQUIPMENT_LISTS.lists.map(l=>`
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border:1px solid var(--border-soft);">
+                <span>${l.name}${l.id===EQUIPMENT_LISTS.activeListId?' <span class="tag-pill">active</span>':''}</span>
+                <button class="del-btn" onclick="deleteEquipmentList('${l.id}')">Delete</button>
+              </div>`).join('') || '<p class="empty-state">No saved lists yet.</p>';
+            const realContent = `
+              <p class="page-sub" style="margin-bottom:14px;">Switch between different gyms or locations from the home screen.</p>
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">${listRows}</div>
+              <div class="add-ex-form">
+                <input id="new-list-name" placeholder="New list name (e.g. Home Gym)">
+                <button class="btn btn-primary" onclick="createEquipmentList()">Create list</button>
+              </div>`;
+            if(isPremium()) return realContent;
+            const previewContent = `
+              <p class="page-sub" style="margin-bottom:14px;">Switch between different gyms or locations from the home screen.</p>
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border:1px solid var(--border-soft);"><span>Home Gym</span></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border:1px solid var(--border-soft);"><span>Work Gym</span></div>
               </div>
-            </div>
-          </div>
+              <div class="add-ex-form"><input placeholder="New list name"><button class="btn btn-primary">Create list</button></div>`;
+            return lockedWrap(previewContent, 'Multiple equipment lists');
+          })()}
         </div>
 
         <div class="panel-section">
@@ -2722,6 +2994,41 @@ async function saveNickname(){
     renderAccountWidget();
     render();
   }catch(e){ alert('Save failed: ' + e.message); }
+}
+
+async function createEquipmentList(){
+  const nameEl = document.getElementById('new-list-name');
+  const name = nameEl.value.trim();
+  if(!name){ alert('Give the list a name.'); return; }
+  try{
+    const resp = await fetch('/api/my/equipment-lists', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){ alert('Couldn\u2019t create that list: ' + (data.detail || data.error || resp.status)); return; }
+    EQUIPMENT_LISTS.lists.push({ id:data.id, name:data.name, created_at:Date.now() });
+    // a brand new second list means there's now a genuine choice to make —
+    // don't silently keep whatever was active before without asking
+    if(EQUIPMENT_LISTS.lists.length>=2) EQUIPMENT_LISTS.activeListId = null;
+    else EQUIPMENT_LISTS.activeListId = data.id;
+    loadGymData();
+    render();
+  }catch(e){ alert('Couldn\u2019t create that list: ' + e.message); }
+}
+
+async function deleteEquipmentList(id){
+  if(!confirm('Delete this equipment list? This can\u2019t be undone.')) return;
+  try{
+    await fetch('/api/my/equipment-lists/'+id, { method:'DELETE' });
+  }catch(e){}
+  EQUIPMENT_LISTS.lists = EQUIPMENT_LISTS.lists.filter(l=>l.id!==id);
+  if(EQUIPMENT_LISTS.activeListId===id){
+    // fall back sensibly: the only remaining list if there's exactly one, otherwise ask again
+    EQUIPMENT_LISTS.activeListId = EQUIPMENT_LISTS.lists.length===1 ? EQUIPMENT_LISTS.lists[0].id : null;
+    loadGymData();
+  }
+  render();
 }
 
 async function addMyEquipment(){
@@ -3168,6 +3475,7 @@ async function generateFourFromPopular(groupSize){
 }
 
 async function selectPopularGroupSize(n){
+  if(!isPremium()){ showPremiumPrompt('Generating from Popular'); return; }
   POPULAR.groupSize = n;
   POPULAR.four = await generateFourFromPopular(n);
   APP.groupSize = n;
@@ -3257,7 +3565,7 @@ function renderPopular(){
     </div>`;
   }
 
-  const generatorSection = POPULAR.four ? `
+  const generatorSectionReal = POPULAR.four ? `
     <div class="panel-section">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3 style="margin:0;">Popular workouts for ${POPULAR.groupSize} ${POPULAR.groupSize===1?'person':'people'}</h3>
@@ -3273,6 +3581,12 @@ function renderPopular(){
       <p class="page-sub" style="margin-bottom:16px;">Pulls from the top few formats above, with popular exercises weighted in.</p>
       <div class="size-grid">${sizeTiles}</div>
     </div>`;
+  const generatorSection = isPremium() ? generatorSectionReal : lockedWrap(`
+    <div class="panel-section">
+      <h3>Generate from the most popular</h3>
+      <p class="page-sub" style="margin-bottom:16px;">Pulls from the top few formats above, with popular exercises weighted in.</p>
+      <div class="size-grid">${sizeTiles}</div>
+    </div>`, 'Generating from Popular');
 
   $main.innerHTML = `
     <div class="screen">
@@ -3324,11 +3638,22 @@ function renderFavourites(){
           <h1 class="page-title" style="font-size:28px;text-align:left;margin:0;">Favourite workouts</h1>
           <button class="btn btn-ghost" onclick="goHome()">Home</button>
         </div>
-        <div class="fav-filter">
-          Filter by group size:
-          <select onchange="APP._favFilter=this.value; render();">${opts}</select>
-        </div>
-        ${list.length? `<div class="fav-grid">${cards}</div>` : `<div class="empty-state">No favourites saved yet &mdash; star a workout from its full-screen view to keep it here.</div>`}
+        ${(() => {
+          const realContent = `
+            <div class="fav-filter">
+              Filter by group size:
+              <select onchange="APP._favFilter=this.value; render();">${opts}</select>
+            </div>
+            ${list.length? `<div class="fav-grid">${cards}</div>` : `<div class="empty-state">No favourites saved yet &mdash; star a workout from its full-screen view to keep it here.</div>`}`;
+          if(isPremium()) return realContent;
+          const preview = `
+            <div class="fav-filter">Filter by group size: <select disabled><option>All group sizes</option></select></div>
+            <div class="fav-grid">
+              <div class="fav-card"><h4>AMRAP &mdash; 30 min</h4><div class="fav-meta">4 people &middot; Moderate</div></div>
+              <div class="fav-card"><h4>Circuit &mdash; 35 min</h4><div class="fav-meta">6 people &middot; Firm</div></div>
+            </div>`;
+          return lockedWrap(preview, 'Favourites');
+        })()}
       </div>
     </div>`;
 }
@@ -3358,8 +3683,17 @@ async function checkLoginStatus(){
   renderAccountWidget();
   renderImportBanner(); // show the one-time legacy-data import prompt now that we know whether they're logged in
   refreshServerRecentHistory(); // don't block the UI on this — repeat-avoidance just uses whatever's cached when generation runs
+  await loadEquipmentLists(); // must resolve BEFORE gym-data, since which list (if any) is active changes what gym-data returns
   loadGymData(); // equipment/exercises differ between logged-in (personal overlay) and logged-out (master-only) — refresh whenever login state is checked
   loadStreakData(); // now shown on the home screen — fetch proactively so it's ready before the user gets there, not a visible pop-in
+  // if the app is still sitting on the untouched initial landing screen (the
+  // synchronous first render, before we knew the tier/list situation), and
+  // it turns out this account has a real choice to make, swap them onto the
+  // location screen now. Anyone who's already navigated elsewhere is left alone.
+  if(APP.screen==='landing' && shouldShowLocationScreen()){
+    APP.screen = 'location';
+    render();
+  }
 }
 
 function signInWithGoogle(){
@@ -3373,6 +3707,7 @@ async function doLogout(){
   ACCOUNT.menuOpen = false;
   SERVER_RECENT_IDS = new Set();
   STREAK.loaded = false;
+  EQUIPMENT_LISTS = { loaded:true, lists:[], activeListId:null };
   renderAccountWidget();
   loadGymData(); // drop back to master-only, read-only data now that personal overrides no longer apply
 }
